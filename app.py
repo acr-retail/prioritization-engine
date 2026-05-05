@@ -3,9 +3,7 @@ ACR Prioritization Engine — Standalone Web App
 Talks to Odoo via JSON-RPC. Auth via Odoo API keys.
 """
 import json
-import sqlite3
 import xmlrpc.client
-from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -26,9 +24,12 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "a
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
-DB_PATH = Path(__file__).parent / "weights.db"
-ODOO_URL = "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com"
-ODOO_DB = "odoo-ps-psus-all-about-technology-sandbox-30173849"
+ODOO_URL = os.environ.get("ODOO_URL", "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com")
+ODOO_DB = os.environ.get("ODOO_DB", "odoo-ps-psus-all-about-technology-sandbox-30173849")
+
+# Odoo models for weight storage
+ATTR_MODEL = "x_acr_priority_attribute"
+WEIGHT_MODEL = "x_acr_priority_weight"
 
 # Stages to exclude from the backlog
 EXCLUDED_STAGES = {"Complete", "Complete_1", "Cancelled"}
@@ -57,111 +58,52 @@ FIELD_LABELS = {
 }
 
 # ---------------------------------------------------------------------------
-# SQLite weight storage
+# Weight storage (Odoo)
 # ---------------------------------------------------------------------------
-def init_db():
-    with get_db() as db:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS attributes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                task_field TEXT NOT NULL,
-                field_type TEXT NOT NULL DEFAULT 'selection',
-                sequence INTEGER DEFAULT 10
-            )
-        """)
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS weights (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                attribute_id INTEGER NOT NULL REFERENCES attributes(id) ON DELETE CASCADE,
-                value TEXT NOT NULL,
-                weight INTEGER NOT NULL,
-                description TEXT
-            )
-        """)
-        # Seed defaults if empty
-        count = db.execute("SELECT COUNT(*) FROM attributes").fetchone()[0]
-        if count == 0:
-            seed_defaults(db)
+def load_weight_map(uid: int, api_key: str) -> dict:
+    """Load all weights from Odoo into a dict for scoring."""
+    attrs = odoo_search_read(uid, api_key, ATTR_MODEL, [],
+                             ["x_name", "x_task_field", "x_field_type", "x_sequence"])
+
+    result = {}
+    for attr in attrs:
+        weights = odoo_search_read(uid, api_key, WEIGHT_MODEL,
+                                   [("x_attribute_id", "=", attr["id"])],
+                                   ["x_value", "x_weight"])
+        result[attr["x_task_field"]] = {
+            "name": attr["x_name"],
+            "field_type": attr["x_field_type"],
+            "values": {w["x_value"]: w["x_weight"] for w in weights},
+        }
+    return result
 
 
-def seed_defaults(db):
-    """Seed the weight configuration from the spreadsheet criteria."""
-    defaults = [
-        ("Customer Priority", "x_studio_customer", "many2one", 1, [
-            ("RonJon", 5), ("NetCost", 4), ("Rouses", 3),
-            ("Shoe Carnival", 1), ("Internal", 5), ("Schnucks", 1),
-        ]),
-        ("Escalation Flag", "x_studio_related_field_5vi_1jnfmj9cf", "boolean", 2, [
-            ("True", 1), ("False", 5),
-        ]),
-        ("Issue Type", "x_studio_issue_type", "selection", 3, [
-            ("System stopping bug - No workaround", -15),
-            ("Critical Workflow Bug- No Workaround", 1),
-            ("Critical Workflow Bug- Workaround available", 2),
-            ("Enhancement", 3), ("Problem", 3), ("Question", 3),
-            ("Non-critical Workflow Bug", 4), ("Documentation", 5),
-        ]),
-        ("Customer Funded", "x_studio_related_field_gd_1jnftb4gl", "selection", 4, [
-            ("Yes", -5), ("No", 5),
-        ]),
-        ("Level of Effort", "x_studio_level_of_effort", "selection", 5, [
-            ("<10 Hrs", 1), ("10-40 Hrs", 3), ("41-100 Hrs", 4), (">100 Hrs", 5),
-        ]),
-        ("Roadmap Flag", "x_studio_road_map_flag", "boolean", 6, [
-            ("True", 1), ("False", 5),
-        ]),
-        ("Paid Prioritization", "x_studio_related_field_27d_1jnftbs3p", "boolean", 7, [
-            ("True", -10), ("False", 5),
-        ]),
-        ("Age Impact", "create_date", "computed", 8, [
-            ("<30", 5), ("30-60", 3), ("60-90", 2), (">90", 1),
-        ]),
-    ]
+def load_attributes_for_config(uid: int, api_key: str) -> list:
+    """Load all attributes with their weights for the config page."""
+    attrs = odoo_search_read(uid, api_key, ATTR_MODEL, [],
+                             ["x_name", "x_task_field", "x_field_type", "x_sequence"])
+    attrs.sort(key=lambda a: a.get("x_sequence", 0))
 
-    for name, field, ftype, seq, values in defaults:
-        cursor = db.execute(
-            "INSERT INTO attributes (name, task_field, field_type, sequence) VALUES (?, ?, ?, ?)",
-            (name, field, ftype, seq),
-        )
-        attr_id = cursor.lastrowid
-        for val, weight in values:
-            db.execute(
-                "INSERT INTO weights (attribute_id, value, weight) VALUES (?, ?, ?)",
-                (attr_id, val, weight),
-            )
-
-
-@contextmanager
-def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def load_weight_map():
-    """Load all weights into a dict for scoring."""
-    with get_db() as db:
-        attrs = db.execute(
-            "SELECT * FROM attributes ORDER BY sequence"
-        ).fetchall()
-        result = {}
-        for attr in attrs:
-            values = db.execute(
-                "SELECT value, weight FROM weights WHERE attribute_id = ?",
-                (attr["id"],),
-            ).fetchall()
-            result[attr["task_field"]] = {
-                "name": attr["name"],
-                "field_type": attr["field_type"],
-                "values": {v["value"]: v["weight"] for v in values},
-            }
-        return result
+    result = []
+    for attr in attrs:
+        weights = odoo_search_read(uid, api_key, WEIGHT_MODEL,
+                                   [("x_attribute_id", "=", attr["id"])],
+                                   ["x_value", "x_weight", "x_description"])
+        weights.sort(key=lambda w: w.get("x_weight", 0))
+        result.append({
+            "attr": {
+                "id": attr["id"],
+                "name": attr["x_name"],
+                "task_field": attr["x_task_field"],
+                "field_type": attr["x_field_type"],
+            },
+            "weights": [
+                {"id": w["id"], "value": w["x_value"], "weight": w["x_weight"],
+                 "description": w.get("x_description", "")}
+                for w in weights
+            ],
+        })
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -273,11 +215,6 @@ def require_auth(request: Request):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-@app.on_event("startup")
-def startup():
-    init_db()
-
-
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     creds = get_session_creds(request)
@@ -324,7 +261,7 @@ async def backlog(request: Request):
         TASK_FIELDS,
     )
 
-    weight_map = load_weight_map()
+    weight_map = load_weight_map(creds["uid"], creds["api_key"])
     tasks = enrich_tasks(tasks, weight_map)
 
     # Build JSON-safe version for the detail panel
@@ -345,15 +282,7 @@ async def config_page(request: Request):
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    with get_db() as db:
-        attrs = db.execute("SELECT * FROM attributes ORDER BY sequence").fetchall()
-        attributes = []
-        for attr in attrs:
-            weights = db.execute(
-                "SELECT * FROM weights WHERE attribute_id = ? ORDER BY weight",
-                (attr["id"],),
-            ).fetchall()
-            attributes.append({"attr": attr, "weights": weights})
+    attributes = load_attributes_for_config(creds["uid"], creds["api_key"])
 
     return templates.TemplateResponse(request, "config.html", {
         "attributes": attributes,
@@ -367,8 +296,11 @@ async def update_weight(request: Request, weight_id: int, weight: int = Form(...
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    with get_db() as db:
-        db.execute("UPDATE weights SET weight = ? WHERE id = ?", (weight, weight_id))
+    try:
+        odoo_write(creds["uid"], creds["api_key"], WEIGHT_MODEL, [weight_id],
+                   {"x_weight": weight})
+    except Exception as e:
+        return RedirectResponse(f"/config?error={str(e)}", status_code=303)
 
     return RedirectResponse("/config", status_code=303)
 
@@ -559,7 +491,7 @@ async def api_task_detail(request: Request, task_id: int):
             msg["_author"] = "System"
 
     # Compute score
-    weight_map = load_weight_map()
+    weight_map = load_weight_map(creds["uid"], creds["api_key"])
     task["_score"] = score_task(task, weight_map)
     task["_age"] = compute_age_bracket(task.get("create_date", ""))
     task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
