@@ -10,13 +10,14 @@ Then seeds them with the default weights from the spreadsheet.
 Usage:
     python setup_odoo_models.py
 """
+import os
 import xmlrpc.client
 import sys
 
-ODOO_URL = "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com"
-ODOO_DB = "odoo-ps-psus-all-about-technology-sandbox-30173849"
-ODOO_USER = "darcy@allabout.technology"
-ODOO_API_KEY = "8675edd840ff653b011c1e4f203dfd2c84ff928e"
+ODOO_URL = os.environ.get("ODOO_URL", "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com")
+ODOO_DB = os.environ.get("ODOO_DB", "odoo-ps-psus-all-about-technology-sandbox-30173849")
+ODOO_USER = os.environ.get("ODOO_USER", "")
+ODOO_API_KEY = os.environ.get("ODOO_API_KEY", "")
 
 
 def execute(models, uid, model, method, *args, **kwargs):
