@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% set active_page = "config" %}
+{% block title %}Weight Configuration — ACR{% endblock %}
+
+{% block content %}
+<div class="container-narrow">
+<div class="page-header">
+    <div>
+        <h1>Scoring Configuration</h1>
+        <p class="subtitle">Adjust priority weights. Lower total score = higher priority. Changes take effect on next backlog refresh.</p>
+    </div>
+</div>
+
+{% for item in attributes %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="config-card-header">
+        <div>
+            <strong>{{ item.attr.name }}</strong>
+            <span class="config-field-name">{{ item.attr.task_field }}</span>
+        </div>
+        <span class="badge badge-gray">{{ item.attr.field_type }}</span>
+    </div>
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Value</th>
+                    <th style="width: 120px;">Weight</th>
+                    <th style="width: 80px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for w in item.weights %}
+                <tr>
+                    <td>{{ w.value }}</td>
+                    <td>
+                        <form method="POST" action="/config/weight/{{ w.id }}" class="weight-form">
+                            <input type="number" name="weight" value="{{ w.weight }}" style="width: 70px;">
+                            <button type="submit" class="btn btn-ghost btn-sm">Save</button>
+                        </form>
+                    </td>
+                    <td>
+                        {% if w.weight < 0 %}
+                        <span style="color: #dc2626; font-size: 0.75rem;">↑ boosts priority</span>
+                        {% elif w.weight <= 2 %}
+                        <span style="color: #ea580c; font-size: 0.75rem;">high priority</span>
+                        {% elif w.weight >= 5 %}
+                        <span style="color: #16a34a; font-size: 0.75rem;">low priority</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .config-card-header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .config-field-name {
+        color: #94a3b8;
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
+    }
+    .weight-form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    @media (max-width: 768px) {
+        .config-card-header { padding: 0.75rem 1rem; }
+        .config-field-name { display: none; }
+        .weight-form input { width: 60px !important; }
+    }
+
+    /* Config tables don't need sticky headers */
+    .container-narrow table thead th {
+        position: static;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,531 @@
+{% extends "base.html" %}
+{% set active_page = "backlog" %}
+{% block title %}Prioritized Backlog — ACR{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Prioritized Backlog</h1>
+        <p class="subtitle">{{ task_count }} open tasks — lowest score = highest priority</p>
+    </div>
+    <div class="stats">
+        {% set critical = tasks | selectattr("_score", "lt", 10) | list | length %}
+        {% set high = tasks | selectattr("_score", "lt", 25) | rejectattr("_score", "lt", 10) | list | length %}
+        <div class="stat">
+            <div class="stat-value" style="color: #dc2626;">{{ critical }}</div>
+            <div class="stat-label">Critical</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" style="color: #ea580c;">{{ high }}</div>
+            <div class="stat-label">High</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ task_count }}</div>
+            <div class="stat-label">Total</div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+    <table id="backlog-table">
+        <thead>
+            <tr>
+                <th class="sortable sort-asc" data-col="0" data-type="num">Score</th>
+                <th class="sortable" data-col="1" data-type="num">ID</th>
+                <th class="sortable" data-col="2" data-type="str">Title</th>
+                <th class="sortable" data-col="3" data-type="str">Customer</th>
+                <th class="sortable" data-col="4" data-type="str">Status</th>
+                <th class="sortable" data-col="5" data-type="str">Type</th>
+                <th class="sortable" data-col="6" data-type="str">Esc.</th>
+                <th class="sortable" data-col="7" data-type="str">Funded</th>
+                <th class="sortable" data-col="8" data-type="str">Effort</th>
+                <th class="sortable" data-col="9" data-type="str">Paid</th>
+                <th class="sortable" data-col="10" data-type="str">Roadmap</th>
+                <th class="sortable" data-col="11" data-type="str">Age</th>
+                <th class="sortable" data-col="12" data-type="str">Created</th>
+            </tr>
+            <tr class="filter-row">
+                <th><select data-col="0"><option value="">All</option></select></th>
+                <th></th>
+                <th></th>
+                <th><select data-col="3"><option value="">All</option></select></th>
+                <th><select data-col="4"><option value="">All</option></select></th>
+                <th><select data-col="5"><option value="">All</option></select></th>
+                <th><select data-col="6"><option value="">All</option></select></th>
+                <th><select data-col="7"><option value="">All</option></select></th>
+                <th><select data-col="8"><option value="">All</option></select></th>
+                <th><select data-col="9"><option value="">All</option></select></th>
+                <th><select data-col="10"><option value="">All</option></select></th>
+                <th><select data-col="11"><option value="">All</option></select></th>
+                <th><select data-col="12"><option value="">All</option></select></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr onclick="openPanel({{ task.id }})" data-task-id="{{ task.id }}">
+                <td>
+                    <span class="score
+                        {% if task._score < 10 %}score-critical
+                        {% elif task._score < 20 %}score-high
+                        {% elif task._score < 30 %}score-medium
+                        {% else %}score-low{% endif %}">
+                        {{ task._score }}
+                    </span>
+                </td>
+                <td style="color: #64748b; font-size: 0.8rem;">{{ task.id }}</td>
+                <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
+                <td>
+                    {% if task._customer %}
+                    <span class="badge badge-blue">{{ task._customer }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if task._stage == 'New' %}
+                    <span class="badge badge-gray">{{ task._stage }}</span>
+                    {% elif 'Progress' in task._stage %}
+                    <span class="badge badge-yellow">{{ task._stage }}</span>
+                    {% elif 'Queued' in task._stage %}
+                    <span class="badge badge-blue">{{ task._stage }}</span>
+                    {% else %}
+                    <span class="badge badge-gray">{{ task._stage }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">{{ task.x_studio_issue_type or '' }}</td>
+                <td>
+                    {% if task.get('x_studio_related_field_5vi_1jnfmj9cf') %}
+                    <span class="badge badge-yellow">Yes</span>
+                    {% else %}
+                    <span style="color: #cbd5e1;">No</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% set funded = task.get('x_studio_related_field_gd_1jnftb4gl', '') %}
+                    {% if funded == 'Yes' %}
+                    <span class="badge badge-green">Yes</span>
+                    {% else %}
+                    <span style="color: #cbd5e1;">{{ funded or 'No' }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
+                <td>
+                    {% if task.get('x_studio_related_field_27d_1jnftbs3p') %}
+                    <span class="badge badge-yellow">Yes</span>
+                    {% else %}
+                    <span style="color: #cbd5e1;">No</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if task.get('x_studio_road_map_flag') %}
+                    <span class="badge badge-blue">Yes</span>
+                    {% else %}
+                    <span style="color: #cbd5e1;">No</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge
+                        {% if task._age == '>90' %}badge-yellow
+                        {% elif task._age == '60-90' %}badge-blue
+                        {% else %}badge-gray{% endif %}">
+                        {{ task._age }}
+                    </span>
+                </td>
+                <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">
+                    {{ task.create_date[:10] if task.create_date else '' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Detail Panel -->
+<div class="panel-overlay" id="panelOverlay" onclick="closePanel()"></div>
+<div class="panel" id="detailPanel">
+    <div class="panel-header">
+        <h2 id="panelTitle">Task Details</h2>
+        <button class="panel-close" onclick="closePanel()">✕</button>
+    </div>
+    <div class="panel-score" id="panelScore"></div>
+    <div class="panel-body" id="panelBody"></div>
+</div>
+
+<!-- Task data for the panel (embedded as JSON) -->
+<script id="taskData" type="application/json">
+{{ task_json | safe }}
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- Task data ----
+const tasks = JSON.parse(document.getElementById('taskData').textContent);
+const taskMap = {};
+tasks.forEach(t => taskMap[t.id] = t);
+
+// ---- Load dropdown options once ----
+let fieldOptions = null;
+fetch('/api/options')
+    .then(r => r.json())
+    .then(data => { fieldOptions = data; })
+    .catch(err => console.error('Failed to load options:', err));
+
+// ---- Build filter dropdowns from actual data ----
+const table = document.getElementById('backlog-table');
+const filterSelects = table.querySelectorAll('.filter-row select');
+
+filterSelects.forEach(select => {
+    const col = parseInt(select.dataset.col);
+    const values = new Set();
+
+    table.querySelectorAll('tbody tr').forEach(row => {
+        const text = row.cells[col].textContent.trim();
+        if (text) values.add(text);
+    });
+
+    // Sort values
+    const sorted = Array.from(values).sort((a, b) => {
+        // Try numeric sort first
+        const na = parseFloat(a), nb = parseFloat(b);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a.localeCompare(b);
+    });
+
+    sorted.forEach(val => {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = val;
+        select.appendChild(opt);
+    });
+
+    select.addEventListener('change', applyFilters);
+    select.addEventListener('click', e => e.stopPropagation());
+});
+
+// ---- Filtering ----
+function applyFilters() {
+    const filters = {};
+    filterSelects.forEach(select => {
+        const col = parseInt(select.dataset.col);
+        const val = select.value;
+        if (val) filters[col] = val;
+    });
+
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        let visible = true;
+        for (const [col, filter] of Object.entries(filters)) {
+            const cell = row.cells[parseInt(col)];
+            if (cell.textContent.trim() !== filter) {
+                visible = false;
+                break;
+            }
+        }
+        row.style.display = visible ? '' : 'none';
+    });
+}
+
+// ---- Detail Panel ----
+function openPanel(taskId) {
+    // Show panel immediately with loading state
+    const task = taskMap[taskId];
+    document.getElementById('panelTitle').textContent = '#' + taskId;
+    document.getElementById('panelScore').innerHTML = '';
+    document.getElementById('panelBody').innerHTML =
+        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
+    document.getElementById('panelOverlay').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+
+    // Fetch full details from Odoo
+    fetch('/api/task/' + taskId)
+        .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+        .then(data => renderPanel(data.task, data.messages))
+        .catch(err => {
+            document.getElementById('panelBody').innerHTML =
+                '<div class="error">' + escHtml(err.message) + '</div>';
+        });
+}
+
+let currentTaskId = null;
+
+function renderPanel(task, messages) {
+    currentTaskId = task.id;
+    const opts = fieldOptions || {};
+
+    // Score
+    let scoreClass = 'score-low';
+    if (task._score < 10) scoreClass = 'score-critical';
+    else if (task._score < 20) scoreClass = 'score-high';
+    else if (task._score < 30) scoreClass = 'score-medium';
+
+    document.getElementById('panelScore').innerHTML =
+        '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
+        '<span style="color:#64748b;font-size:0.85rem;">Priority Score — lower is more urgent</span>';
+
+    let html = '<form id="panelForm" onsubmit="return savePanel(event)">';
+
+    // Title - text input
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Title</div>' +
+        '<input type="text" name="name" value="' + escAttr(task.name || '') + '" class="panel-input">' +
+        '</div>';
+
+    // Grid of editable fields
+    html += '<div class="panel-grid">';
+
+    // Customer - dropdown
+    const custId = task.x_studio_customer ? (Array.isArray(task.x_studio_customer) ? task.x_studio_customer[0] : task.x_studio_customer) : '';
+    html += panelSelect('Customer', 'x_studio_customer', custId, opts.customers || [], 'id', 'name');
+
+    // Status - dropdown
+    const stageId = task.stage_id ? (Array.isArray(task.stage_id) ? task.stage_id[0] : task.stage_id) : '';
+    html += panelSelect('Status', 'stage_id', stageId, opts.stages || [], 'id', 'name');
+
+    // Issue Type - dropdown
+    html += panelSelect('Issue Type', 'x_studio_issue_type', task.x_studio_issue_type || '', opts.issue_types || [], 'value', 'label');
+
+    // Escalated - Yes/No
+    html += panelBool('Escalated', 'x_studio_related_field_5vi_1jnfmj9cf', task.x_studio_related_field_5vi_1jnfmj9cf);
+
+    // Customer Funded - dropdown
+    html += panelSelect('Customer Funded', 'x_studio_related_field_gd_1jnftb4gl', task.x_studio_related_field_gd_1jnftb4gl || '', opts.customer_funded || [], 'value', 'label');
+
+    // Level of Effort - dropdown
+    html += panelSelect('Level of Effort', 'x_studio_level_of_effort', task.x_studio_level_of_effort || '', opts.effort_levels || [], 'value', 'label');
+
+    // Paid Prioritization - Yes/No
+    html += panelBool('Paid Prioritization', 'x_studio_related_field_27d_1jnftbs3p', task.x_studio_related_field_27d_1jnftbs3p);
+
+    // Roadmap - Yes/No
+    html += panelBool('Roadmap', 'x_studio_road_map_flag', task.x_studio_road_map_flag);
+
+    // Priority - dropdown
+    html += panelSelect('Priority', 'priority', task.priority || '0', opts.priorities || [], 'value', 'label');
+
+    // Age - read only
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Age</div>' +
+        '<div class="panel-field-value">' + escHtml(task._age || '—') + '</div></div>';
+
+    // Created - read only
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Created</div>' +
+        '<div class="panel-field-value">' + escHtml(task.create_date ? task.create_date.slice(0, 10) : '—') + '</div></div>';
+
+    // Assigned - date picker
+    html += panelDate('Assigned', 'date_assign', task.date_assign ? task.date_assign.slice(0, 10) : '');
+
+    // Deadline - date picker
+    html += panelDate('Deadline', 'date_deadline', task.date_deadline ? task.date_deadline.slice(0, 10) : '');
+
+    // Time Allocated - number
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Time Allocated (hrs)</div>' +
+        '<input type="number" name="allocated_hours" step="0.5" min="0" value="' +
+        (task.allocated_hours || '') + '" class="panel-input" placeholder="—">' +
+        '</div>';
+
+    // Time Spent - read only
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Time Spent</div>' +
+        '<div class="panel-field-value">' + (task.effective_hours ? task.effective_hours.toFixed(1) + 'h' : '—') + '</div></div>';
+
+    html += '</div>'; // end grid
+
+    // Save button
+    html += '<div style="margin-top:1.25rem;display:flex;gap:0.75rem;">' +
+        '<button type="submit" class="btn btn-primary" id="panelSaveBtn">Save Changes</button>' +
+        '<span id="panelSaveStatus" style="font-size:0.8rem;color:#16a34a;align-self:center;"></span>' +
+        '</div>';
+
+    html += '</form>';
+
+    // Description
+    if (task.description && task.description !== '<p><br></p>' && task.description !== false) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label">Description</div>' +
+            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;max-height:200px;overflow-y:auto;">' +
+            task.description + '</div></div>';
+    }
+
+    // Conversation / Messages
+    if (messages && messages.length > 0) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (' + messages.length + ')</div>';
+
+        for (const msg of messages) {
+            const msgDate = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
+            const author = msg._author || 'System';
+            const typeIcon = msg.message_type === 'email' ? '✉' :
+                             msg.message_type === 'comment' ? '💬' : '🔔';
+
+            html += '<div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
+                '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">' +
+                typeIcon + ' ' + escHtml(author) + '</span>' +
+                '<span style="font-size:0.7rem;color:#94a3b8;">' + escHtml(msgDate) + '</span>' +
+                '</div>' +
+                '<div style="font-size:0.8rem;color:#475569;line-height:1.5;overflow-wrap:break-word;">' +
+                msg.body + '</div>';
+
+            if (msg._attachments && msg._attachments.length > 0) {
+                html += '<div style="margin-top:0.4rem;">';
+                for (const att of msg._attachments) {
+                    const size = att.file_size ? ' (' + (att.file_size / 1024).toFixed(0) + ' KB)' : '';
+                    html += '<span style="display:inline-block;font-size:0.7rem;color:#2563eb;' +
+                        'background:#eff6ff;padding:0.15rem 0.4rem;border-radius:3px;margin-right:0.3rem;">' +
+                        '📎 ' + escHtml(att.name) + size + '</span>';
+                }
+                html += '</div>';
+            }
+
+            html += '</div>';
+        }
+
+        html += '</div>';
+    }
+
+    // Link to Odoo
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<a href="https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com/web#id=' +
+        task.id + '&model=project.task&view_type=form" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;">' +
+        'Open in Odoo →</a></div>';
+
+    document.getElementById('panelBody').innerHTML = html;
+}
+
+// ---- Panel form helpers ----
+
+function panelSelect(label, name, currentVal, options, valKey, labelKey) {
+    let html = '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
+        '<select name="' + name + '" class="panel-input">' +
+        '<option value="">—</option>';
+    for (const opt of options) {
+        const v = String(opt[valKey]);
+        const selected = String(currentVal) === v ? ' selected' : '';
+        html += '<option value="' + escAttr(v) + '"' + selected + '>' + escHtml(opt[labelKey]) + '</option>';
+    }
+    html += '</select></div>';
+    return html;
+}
+
+function panelBool(label, name, currentVal) {
+    const yes = currentVal === true ? ' selected' : '';
+    const no = currentVal !== true ? ' selected' : '';
+    return '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
+        '<select name="' + name + '" class="panel-input">' +
+        '<option value="false"' + no + '>No</option>' +
+        '<option value="true"' + yes + '>Yes</option>' +
+        '</select></div>';
+}
+
+function panelDate(label, name, currentVal) {
+    return '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
+        '<input type="date" name="' + name + '" value="' + escAttr(currentVal) + '" class="panel-input">' +
+        '</div>';
+}
+
+function escAttr(s) {
+    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---- Save panel changes to Odoo ----
+
+function savePanel(e) {
+    e.preventDefault();
+    const form = document.getElementById('panelForm');
+    const btn = document.getElementById('panelSaveBtn');
+    const status = document.getElementById('panelSaveStatus');
+    const formData = new FormData(form);
+
+    // Build JSON payload
+    const data = {};
+    for (const [key, val] of formData.entries()) {
+        // Convert booleans
+        if (val === 'true') data[key] = true;
+        else if (val === 'false') data[key] = false;
+        else data[key] = val;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    status.textContent = '';
+
+    fetch('/api/task/' + currentTaskId + '/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Save failed'); });
+        return r.json();
+    })
+    .then(result => {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+        status.textContent = '✓ Saved';
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+        status.textContent = '✗ ' + err.message;
+        status.style.color = '#dc2626';
+    });
+
+    return false;
+}
+
+function closePanel() {
+    document.getElementById('panelOverlay').classList.remove('open');
+    document.getElementById('detailPanel').classList.remove('open');
+}
+
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+// ---- Sorting ----
+const headers = table.querySelectorAll('th.sortable');
+let currentSort = {col: 0, dir: 'asc'};
+
+headers.forEach(th => {
+    th.addEventListener('click', () => {
+        const col = parseInt(th.dataset.col);
+        const type = th.dataset.type;
+        let dir = 'asc';
+
+        if (currentSort.col === col && currentSort.dir === 'asc') dir = 'desc';
+
+        headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+        th.classList.add('sort-' + dir);
+        currentSort = {col, dir};
+
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            let va = a.cells[col].textContent.trim();
+            let vb = b.cells[col].textContent.trim();
+
+            if (type === 'num') {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+                return dir === 'asc' ? va - vb : vb - va;
+            }
+
+            va = va.toLowerCase();
+            vb = vb.toLowerCase();
+            if (va < vb) return dir === 'asc' ? -1 : 1;
+            if (va > vb) return dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+    });
+});
+</script>
+{% endblock %}

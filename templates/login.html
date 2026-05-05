@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Login — ACR Prioritization{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 3rem auto; padding: 0 1rem;">
+    <h1>Sign in</h1>
+    <p class="subtitle">Use your Odoo email and API key to connect.</p>
+
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <div class="card" style="padding: 1.5rem;">
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label for="login">Odoo Email</label>
+                <input type="email" id="login" name="login" required placeholder="you@company.com">
+            </div>
+            <div class="form-group">
+                <label for="api_key">API Key</label>
+                <input type="password" id="api_key" name="api_key" required placeholder="Your Odoo API key">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+                Connect to Odoo
+            </button>
+        </form>
+    </div>
+
+    <p style="margin-top: 1rem; font-size: 0.75rem; color: #94a3b8; text-align: center;">
+        Generate an API key in Odoo: Avatar → My Profile → Account Security → New API Key
+    </p>
+</div>
+{% endblock %}
