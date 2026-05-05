@@ -19,8 +19,10 @@ from starlette.middleware.sessions import SessionMiddleware
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
+import os
+
 app = FastAPI(title="ACR Prioritization Engine")
-app.add_middleware(SessionMiddleware, secret_key="acr-priority-dev-secret-change-in-prod")
+app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "acr-priority-dev-secret-change-in-prod"))
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
