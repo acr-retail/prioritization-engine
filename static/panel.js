@@ -61,6 +61,75 @@ function openPanel(taskId) {
         });
 }
 
+function openTicketPanel(ticketId) {
+    document.getElementById('panelTitle').textContent = '#' + ticketId;
+    document.getElementById('panelScore').innerHTML = '';
+    document.getElementById('panelBody').innerHTML =
+        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
+    document.getElementById('panelOverlay').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+
+    fetch('/api/ticket/detail/' + ticketId)
+        .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+        .then(data => renderTicketPanel(data.ticket, data.messages))
+        .catch(err => {
+            document.getElementById('panelBody').innerHTML =
+                '<div class="error">' + escHtml(err.message) + '</div>';
+        });
+}
+
+function renderTicketPanel(ticket, messages) {
+    const opts = fieldOptions || {};
+
+    const score = ticket._score || 0;
+    document.getElementById('panelScore').innerHTML =
+        '<span class="score ' + getScoreClass(score) + '">' + score + '</span>' +
+        '<span style="color:#64748b;font-size:0.85rem;">Priority Score</span>';
+
+    let html = '<div class="panel-field"><div class="panel-field-label">Title</div>' +
+        '<div class="panel-field-value">' + escHtml(ticket.name || '') + '</div></div>';
+
+    const stage = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[1] : ticket.stage_id) : '—';
+    const customer = ticket.partner_id ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[1] : ticket.partner_id) : '—';
+    const assignee = ticket.user_id ? (Array.isArray(ticket.user_id) ? ticket.user_id[1] : ticket.user_id) : '—';
+
+    html += '<div class="panel-grid">';
+    html += panelReadonly('Status', stage, 'Current ticket stage.');
+    html += panelReadonly('Customer', customer, 'The customer this ticket is for.');
+    html += panelReadonly('Assignee', assignee, 'Who is handling this ticket.');
+    html += panelReadonly('Issue Type', ticket.x_studio_customer_impact || '—', 'Classification of the issue.');
+    html += panelReadonly('Escalated', ticket.x_studio_escalated ? 'Yes' : 'No', 'Whether this ticket has been escalated.');
+    html += panelReadonly('Customer Funded', ticket.x_studio_customer_funded || '—', 'Whether the customer is paying for this.');
+    html += panelReadonly('Paid Prioritization', ticket.x_studio_paid_prioritization ? 'Yes' : 'No', 'Whether paid priority was requested.');
+    html += panelReadonly('Ticket Ref', ticket.ticket_ref || '—', 'Bugzilla ticket number.');
+    html += panelReadonly('Created', ticket.create_date ? ticket.create_date.slice(0, 10) : '—', 'Date created.');
+    html += '</div>';
+
+    // Description
+    if (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label">Description</div>' +
+            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;">' + ticket.description + '</div></div>';
+    }
+
+    // Messages
+    const msgCount = messages ? messages.length : 0;
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">' + msgCount + '</span>)</div>' +
+        '<div class="conversation-list">';
+    if (messages) messages.forEach(msg => html += renderMessage(msg));
+    html += '</div></div>';
+
+    // Comment box
+    html += '<div style="margin-top:1rem;"><textarea id="commentBox" rows="3" class="panel-input" ' +
+        'style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
+        '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\',' + ticket.id + ')">Post Comment</button>' +
+        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span></div></div>';
+
+    document.getElementById('panelBody').innerHTML = html;
+}
+
 function closePanel() {
     document.getElementById('panelOverlay').classList.remove('open');
     document.getElementById('detailPanel').classList.remove('open');

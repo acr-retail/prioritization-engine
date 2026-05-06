@@ -443,32 +443,109 @@ async def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 
+TICKET_FIELDS = [
+    "id", "name", "stage_id", "create_date", "user_id",
+    "partner_id", "ticket_ref",
+    "x_studio_customer_impact",
+    "x_studio_customer_funded",
+    "x_studio_escalated",
+    "x_studio_paid_prioritization",
+]
+
+TICKET_EXCLUDED_STAGES = {"Solved", "Cancelled", "Closed", "CLOSED", "RESOLVED", "VERIFIED"}
+
+
+def get_open_tickets_cached(uid: int, api_key: str):
+    """Get open helpdesk tickets with caching."""
+    cached = cache_get(uid, "open_tickets")
+    if cached is not None:
+        return cached
+
+    tickets = odoo_search_read(uid, api_key, "helpdesk.ticket",
+                               [("stage_id.name", "not in", list(TICKET_EXCLUDED_STAGES))],
+                               TICKET_FIELDS)
+    cache_set(uid, "open_tickets", tickets)
+    return tickets
+
+
+def enrich_tickets(tickets: list, weight_map: dict, sel_labels: dict = None) -> list:
+    """Enrich helpdesk tickets with score and display values."""
+    for t in tickets:
+        # Map ticket fields to the same names the scoring expects
+        t["_item_type"] = "ticket"
+        t["x_studio_issue_type"] = t.get("x_studio_customer_impact", False)
+        t["x_studio_related_field_gd_1jnftb4gl"] = t.get("x_studio_customer_funded", False)
+        t["x_studio_related_field_5vi_1jnfmj9cf"] = t.get("x_studio_escalated", False)
+        t["x_studio_related_field_27d_1jnftbs3p"] = t.get("x_studio_paid_prioritization", False)
+        t["x_studio_customer"] = t.get("partner_id", False)
+        t["x_studio_level_of_effort"] = False
+        t["x_studio_road_map_flag"] = False
+
+        t["_score"] = score_task(t, weight_map, sel_labels)
+        t["_age"] = compute_age_bracket(t.get("create_date", ""))
+        t["_grooming"] = compute_grooming(t)
+        t["_stage"] = t["stage_id"][1] if isinstance(t.get("stage_id"), (list, tuple)) else ""
+        t["_customer"] = ""
+        cust = t.get("partner_id")
+        if isinstance(cust, (list, tuple)) and len(cust) > 1:
+            t["_customer"] = cust[1]
+
+        # Assignee
+        uid_val = t.get("user_id")
+        if isinstance(uid_val, (list, tuple)) and len(uid_val) > 1:
+            t["_assignee"] = uid_val[1]
+            t["_assignee_id"] = uid_val[0]
+            t["user_ids"] = [uid_val[0]]
+        else:
+            t["_assignee"] = "Unassigned"
+            t["_assignee_id"] = 0
+            t["user_ids"] = []
+
+    tickets.sort(key=lambda t: t["_score"])
+    return tickets
+
+
 @app.get("/backlog", response_class=HTMLResponse)
 async def backlog(request: Request):
     creds = get_session_creds(request)
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    # Pull open tasks (cached)
-    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
+    view_mode = request.query_params.get("view", "tasks")
+
     weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
     sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
-    # Deep copy so enrichment doesn't mutate cache
-    tasks = [dict(t) for t in tasks]
-    tasks = enrich_tasks(tasks, weight_map, sel_labels)
-    resolve_user_names(tasks, creds["uid"], creds["api_key"])
 
-    task_json = json.dumps(tasks, default=str)
+    items = []
 
-    thresholds = compute_score_thresholds(tasks)
+    if view_mode == "tasks":
+        tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
+        tasks = [dict(t) for t in tasks]
+        tasks = enrich_tasks(tasks, weight_map, sel_labels)
+        resolve_user_names(tasks, creds["uid"], creds["api_key"])
+        for t in tasks:
+            t["_item_type"] = "task"
+        items = tasks
+    else:
+        tickets = get_open_tickets_cached(creds["uid"], creds["api_key"])
+        tickets = [dict(t) for t in tickets]
+        tickets = enrich_tickets(tickets, weight_map, sel_labels)
+        items = tickets
+
+    items.sort(key=lambda t: t.get("_score", 0))
+
+    task_json = json.dumps(items, default=str)
+
+    thresholds = compute_score_thresholds(items)
 
     return templates.TemplateResponse(request, "backlog.html", {
-        "tasks": tasks,
+        "tasks": items,
         "task_json": task_json,
         "login": creds["login"],
         "field_labels": FIELD_LABELS,
-        "task_count": len(tasks),
+        "task_count": len(items),
         "thresholds": thresholds,
+        "view_mode": view_mode,
     })
 
 
@@ -479,7 +556,7 @@ async def gantt_page(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     # Pull open tasks with date fields (cached)
-    gantt_extra = ["planned_date_begin", "date_end", "date_deadline", "user_ids"]
+    gantt_extra = ["planned_date_begin", "date_end", "date_deadline", "user_ids", "project_id", "parent_id"]
     tasks = get_open_tasks_cached(creds["uid"], creds["api_key"], extra_fields=gantt_extra)
     weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
     sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
@@ -512,6 +589,15 @@ async def gantt_page(request: Request):
         # Deadline (hard constraint)
         deadline = t.get("date_deadline")
         t["_deadline"] = deadline[:10] if deadline else None
+
+        # Project name
+        proj = t.get("project_id")
+        t["_project"] = proj[1] if isinstance(proj, (list, tuple)) and len(proj) > 1 else "No Project"
+
+        # Parent task
+        parent = t.get("parent_id")
+        t["_parent"] = parent[1] if isinstance(parent, (list, tuple)) and len(parent) > 1 else None
+        t["_parent_id"] = parent[0] if isinstance(parent, (list, tuple)) and len(parent) > 0 else None
 
     task_json = json.dumps(tasks, default=str)
 
@@ -584,6 +670,7 @@ async def api_update_task_dates(request: Request, task_id: int):
 
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
+    cache_clear(creds["uid"], "open_tickets")
     return {"ok": True}
 
 
@@ -792,6 +879,7 @@ async def update_task(request: Request, task_id: int):
     # Invalidate task cache since data changed
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
+    cache_clear(creds["uid"], "open_tickets")
 
     return {"ok": True, "updated": updated}
 
@@ -886,6 +974,57 @@ async def api_task_detail(request: Request, task_id: int):
     }
 
 
+@app.get("/api/ticket/detail/{ticket_id}")
+async def api_ticket_detail(request: Request, ticket_id: int):
+    """Fetch full helpdesk ticket details + chatter messages."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    tickets = odoo_search_read(
+        creds["uid"], creds["api_key"], "helpdesk.ticket",
+        [("id", "=", ticket_id)],
+        TICKET_FIELDS + ["description"],
+        limit=1,
+    )
+
+    if not tickets:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    ticket = tickets[0]
+
+    # Score
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    # Map to scoring field names
+    t = dict(ticket)
+    t["x_studio_issue_type"] = t.get("x_studio_customer_impact", False)
+    t["x_studio_related_field_gd_1jnftb4gl"] = t.get("x_studio_customer_funded", False)
+    t["x_studio_related_field_5vi_1jnfmj9cf"] = t.get("x_studio_escalated", False)
+    t["x_studio_related_field_27d_1jnftbs3p"] = t.get("x_studio_paid_prioritization", False)
+    t["x_studio_customer"] = t.get("partner_id", False)
+    t["x_studio_level_of_effort"] = False
+    t["x_studio_road_map_flag"] = False
+    ticket["_score"] = score_task(t, weight_map, sel_labels)
+
+    # Messages
+    messages = odoo_search_read(
+        creds["uid"], creds["api_key"], "mail.message",
+        [("res_id", "=", ticket_id), ("model", "=", "helpdesk.ticket"),
+         ("message_type", "in", ["comment", "email", "notification"])],
+        ["body", "date", "author_id", "message_type", "subtype_id"],
+        limit=0,
+    )
+    messages.sort(key=lambda m: m.get("date", ""), reverse=True)
+    for msg in messages:
+        if isinstance(msg.get("author_id"), (list, tuple)):
+            msg["_author"] = msg["author_id"][1]
+        else:
+            msg["_author"] = "System"
+
+    return {"ticket": ticket, "messages": messages}
+
+
 @app.post("/api/task/{task_id}/comment")
 async def api_post_task_comment(request: Request, task_id: int):
     """Post a comment to a project.task's chatter as the logged-in user."""
@@ -975,6 +1114,7 @@ async def api_bulk_update(request: Request):
 
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
+    cache_clear(creds["uid"], "open_tickets")
     return {"ok": True, "updated": len(task_ids)}
 
 

@@ -3,6 +3,13 @@
 {% block title %}Prioritized Backlog — ACR{% endblock %}
 
 {% block content %}
+<script>
+// Redirect to saved view preference if no ?view= param
+if (!window.location.search.includes('view=')) {
+    const saved = localStorage.getItem('backlogView') || 'tasks';
+    window.location.replace('/backlog?view=' + saved);
+}
+</script>
 <div id="pageLoading" style="display:flex;align-items:center;gap:0.75rem;padding:1rem 0;">
     <div class="spinner"></div>
     <span style="font-size:0.85rem;color:#64748b;">Loading tasks from Odoo...</span>
@@ -43,7 +50,11 @@
                 <div class="stat-label">Total</div>
             </div>
         </div>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+            <div style="display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;font-size:0.8rem;">
+                <a href="/backlog?view=tasks" onclick="localStorage.setItem('backlogView','tasks')" class="btn btn-sm {% if view_mode == 'tasks' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;">Tasks</a>
+                <a href="/backlog?view=tickets" onclick="localStorage.setItem('backlogView','tickets')" class="btn btn-sm {% if view_mode == 'tickets' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;border-left:1px solid #e2e8f0;">Tickets</a>
+            </div>
             <button class="btn btn-ghost" onclick="refreshBacklog()">Refresh</button>
             <button class="btn btn-ghost" onclick="openClosedLookup()">View Closed Ticket</button>
             <button class="btn btn-ghost" id="bulkEditToggle" onclick="toggleBulkMode()">Bulk Edit</button>
@@ -138,19 +149,19 @@ function toggleBacklogHelp() {
             <tr>
                 <th class="sortable sort-asc" data-col="0">Score</th>
                 <th data-col="1">Groom</th>
-                <th class="sortable" data-col="2">ID</th>
-                <th class="sortable" data-col="2">Title</th>
-                <th class="sortable" data-col="3">Customer</th>
-                <th class="sortable" data-col="4">Status</th>
-                <th class="sortable" data-col="5">Type</th>
-                <th class="sortable" data-col="6">Esc.</th>
-                <th class="sortable" data-col="7">Funded</th>
-                <th class="sortable" data-col="8">Effort</th>
-                <th class="sortable" data-col="9">Paid</th>
-                <th class="sortable" data-col="10">Roadmap</th>
-                <th class="sortable" data-col="11">Assignee</th>
-                <th class="sortable" data-col="12">Age</th>
-                <th class="sortable" data-col="13">Created</th>
+                <th class="sortable" data-col="2" data-type="num">ID</th>
+                <th class="sortable" data-col="3" data-type="str">Title</th>
+                <th class="sortable" data-col="4" data-type="str">Customer</th>
+                <th class="sortable" data-col="5" data-type="str">Status</th>
+                <th class="sortable" data-col="6" data-type="str">Issue Type</th>
+                <th class="sortable" data-col="7" data-type="str">Esc.</th>
+                <th class="sortable" data-col="8" data-type="str">Funded</th>
+                <th class="sortable" data-col="9" data-type="str">Effort</th>
+                <th class="sortable" data-col="10" data-type="str">Paid</th>
+                <th class="sortable" data-col="11" data-type="str">Roadmap</th>
+                <th class="sortable" data-col="12" data-type="str">Assignee</th>
+                <th class="sortable" data-col="13" data-type="str">Age</th>
+                <th class="sortable" data-col="14" data-type="str">Created</th>
             </tr>
             <tr class="filter-row">
                 <th><select data-col="0"><option value="">All</option></select></th>
@@ -172,7 +183,7 @@ function toggleBacklogHelp() {
         </thead>
         <tbody>
             {% for task in tasks %}
-            <tr onclick="handleRowClick(event, {{ task.id }})" data-task-id="{{ task.id }}">
+            <tr onclick="handleRowClick(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')" data-task-id="{{ task.id }}" data-item-type="{{ task.get('_item_type', 'task') }}">
                 <td>
                     <span class="score
                         {% if task._score < thresholds.critical %}score-critical
@@ -189,7 +200,7 @@ function toggleBacklogHelp() {
                     <span style="color:#d4d4d8;">✓</span>
                     {% endif %}
                 </td>
-                <td style="color: #64748b; font-size: 0.8rem;">{{ task.id }}</td>
+                <td style="color: #64748b; font-size: 0.8rem;">{{ task.get('ticket_ref', '') or task.id }}</td>
                 <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
                 <td>{% if task._customer %}<span class="badge badge-blue">{{ task._customer }}</span>{% endif %}</td>
                 <td>
@@ -223,7 +234,7 @@ function toggleBacklogHelp() {
 document.getElementById('pageLoading').style.display = 'none';
 function refreshBacklog() {
     document.getElementById('pageLoading').style.display = 'flex';
-    window.location.href = '/backlog';
+    window.location.href = '/backlog?view={{ view_mode }}';
 }
 window.addEventListener('pageshow', e => { if (e.persisted) document.getElementById('pageLoading').style.display = 'none'; });
 
@@ -319,17 +330,18 @@ function applyGroomFilter() {
 }
 
 // ---- Row click ----
-function handleRowClick(event, taskId) {
-    // Don't handle if clicking on an inline editor
-    if (event.target.classList.contains('inline-edit') || event.target.closest('.editing')) return;
-
+function handleRowClick(event, itemId, itemType) {
     if (bulkMode) {
         const row = event.currentTarget;
-        if (selectedIds.has(taskId)) { selectedIds.delete(taskId); row.classList.remove('selected'); }
-        else { selectedIds.add(taskId); row.classList.add('selected'); }
+        if (selectedIds.has(itemId)) { selectedIds.delete(itemId); row.classList.remove('selected'); }
+        else { selectedIds.add(itemId); row.classList.add('selected'); }
         updateBulkCount();
     } else {
-        openPanel(taskId);
+        if (itemType === 'ticket') {
+            openTicketPanel(itemId);
+        } else {
+            openPanel(itemId);
+        }
     }
 }
 

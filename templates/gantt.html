@@ -100,10 +100,12 @@
 
 <div class="gantt-controls">
     <div><label>Group by:</label>
-        <select id="groupBy" onchange="rebuildGantt()">
-            <option value="assignee">Assignee</option><option value="customer">Customer</option>
-            <option value="status">Status</option><option value="none">No grouping</option>
+        <select id="groupBy" onchange="localStorage.setItem('ganttGroupBy',this.value);rebuildGantt()">
+            <option value="project">Project</option><option value="assignee">Assignee</option>
+            <option value="customer">Customer</option><option value="status">Status</option>
+            <option value="none">No grouping</option>
         </select></div>
+    <div><label>Project:</label><select id="filterProject" onchange="rebuildGantt()"><option value="">All</option></select></div>
     <div><label>Customer:</label><select id="filterCustomer" onchange="rebuildGantt()"><option value="">All</option></select></div>
     <div><label>Assignee:</label><select id="filterAssignee" onchange="rebuildGantt()"><option value="">All</option></select></div>
     <div><label>Status:</label><select id="filterStatus" onchange="rebuildGantt()"><option value="">All</option></select></div>
@@ -142,9 +144,11 @@ function barColor(t) { return (t._assignee && t._assignee !== 'Unassigned') ? AS
 const _c = [...new Set(allTasks.map(t=>t._customer).filter(Boolean))].sort();
 const _a = [...new Set(allTasks.map(t=>t._assignee).filter(Boolean))].sort();
 const _s = [...new Set(allTasks.map(t=>t._stage).filter(Boolean))].sort();
+const _p = [...new Set(allTasks.map(t=>t._project).filter(Boolean))].sort();
 _c.forEach(c => document.getElementById('filterCustomer').innerHTML += '<option>'+escHtml(c)+'</option>');
 _a.forEach(a => document.getElementById('filterAssignee').innerHTML += '<option>'+escHtml(a)+'</option>');
 _s.forEach(s => document.getElementById('filterStatus').innerHTML += '<option>'+escHtml(s)+'</option>');
+_p.forEach(p => document.getElementById('filterProject').innerHTML += '<option>'+escHtml(p)+'</option>');
 
 // Date helpers
 function pd(s){return new Date(s+'T00:00:00')} function fd(d){return d.toISOString().slice(0,10)}
@@ -199,11 +203,13 @@ function px2d(px) {
 function rebuildGantt() {
     setupZoom();
     const gBy = document.getElementById('groupBy').value;
+    const fP = document.getElementById('filterProject').value;
     const fC = document.getElementById('filterCustomer').value;
     const fA = document.getElementById('filterAssignee').value;
     const fS = document.getElementById('filterStatus').value;
 
     let tasks = allTasks.filter(t => {
+        if (fP && t._project !== fP) return false;
         if (fC && t._customer !== fC) return false;
         if (fA && t._assignee !== fA) return false;
         if (fS && t._stage !== fS) return false;
@@ -212,11 +218,36 @@ function rebuildGantt() {
 
     const groups = {};
     tasks.forEach(t => {
-        let k = gBy==='assignee'?(t._assignee||'Unassigned'):gBy==='customer'?(t._customer||'No Customer'):gBy==='status'?(t._stage||'Unknown'):'__all__';
+        let k;
+        if (gBy === 'assignee') k = t._assignee || 'Unassigned';
+        else if (gBy === 'project') k = t._project || 'No Project';
+        else if (gBy === 'customer') k = t._customer || 'No Customer';
+        else if (gBy === 'status') k = t._stage || 'Unknown';
+        else k = '__all__';
         if (!groups[k]) groups[k]=[];
         groups[k].push(t);
     });
-    const gKeys = Object.keys(groups).sort((a,b)=>{if(a==='Unassigned'||a==='No Customer')return 1;if(b==='Unassigned'||b==='No Customer')return -1;return a.localeCompare(b);});
+
+    // For project grouping, sort tasks within each group: parents first, then children under their parent
+    if (gBy === 'project') {
+        for (const k of Object.keys(groups)) {
+            const parents = groups[k].filter(t => !t._parent_id);
+            const children = groups[k].filter(t => t._parent_id);
+            const ordered = [];
+            parents.sort((a,b) => a._score - b._score);
+            parents.forEach(p => {
+                ordered.push(p);
+                const kids = children.filter(c => c._parent_id === p.id);
+                kids.sort((a,b) => a._score - b._score);
+                kids.forEach(c => { c._is_child = true; ordered.push(c); });
+            });
+            // Add orphan children (parent not in open tasks)
+            children.filter(c => !parents.find(p => p.id === c._parent_id)).forEach(c => ordered.push(c));
+            groups[k] = ordered;
+        }
+    }
+
+    const gKeys = Object.keys(groups).sort((a,b)=>{if(a==='Unassigned'||a==='No Customer'||a==='No Project')return 1;if(b==='Unassigned'||b==='No Customer'||b==='No Project')return -1;return a.localeCompare(b);});
 
     // Headers
     let dH='';
@@ -244,7 +275,9 @@ function rebuildGantt() {
         gt.sort((a,b)=>a._score-b._score);
         gt.forEach(task=>{
             const col=barColor(task);
-            lH+='<div class="gantt-task-lbl" onclick="openPanel('+task.id+')" title="'+escAttr(task.name)+'">'+
+            const indent = task._is_child ? 'padding-left:2rem;' : '';
+            lH+='<div class="gantt-task-lbl" onclick="openPanel('+task.id+')" title="'+escAttr(task.name)+'" style="'+indent+'">'+
+                (task._is_child ? '<span style="color:#cbd5e1;margin-right:0.3rem;font-size:0.6rem;">↳</span>' : '') +
                 '<span class="ts" style="background:'+col+'">'+task._score+'</span>'+
                 '<span class="tn">'+escHtml(task.name.slice(0,35))+'</span></div>';
 
@@ -411,6 +444,10 @@ onTaskUpdated = function(task) {
     taskMap[task.id] = Object.assign(taskMap[task.id] || {}, task);
     rebuildGantt();
 };
+
+// Restore saved grouping preference
+const savedGroup = localStorage.getItem('ganttGroupBy');
+if (savedGroup) document.getElementById('groupBy').value = savedGroup;
 
 rebuildGantt();
 </script>
