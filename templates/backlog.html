@@ -476,7 +476,14 @@ function renderClosedTicket(data) {
         '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
         '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\','+ticket.id+')">Post Comment</button>' +
         '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span></div></div>';
-    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div style="display:flex;gap:0.5rem;">' +
+    // Link to Odoo
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<a href="https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com/web#id=' +
+        ticket.id + '&model=helpdesk.ticket&view_type=form" target="_blank" ' +
+        'class="btn btn-ghost" style="width:100%;justify-content:center;">Open Ticket in Odoo →</a></div>';
+
+    // Look up another
+    html += '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div style="display:flex;gap:0.5rem;">' +
         '<input type="text" id="closedTicketRef" placeholder="Look up another..." class="panel-input" style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
         '<button class="btn btn-ghost" onclick="lookupClosedTicket()">Look Up</button></div></div>';
 

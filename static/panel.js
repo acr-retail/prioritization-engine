@@ -127,6 +127,12 @@ function renderTicketPanel(ticket, messages) {
         '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\',' + ticket.id + ')">Post Comment</button>' +
         '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span></div></div>';
 
+    // Link to Odoo
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<a href="https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com/web#id=' +
+        ticket.id + '&model=helpdesk.ticket&view_type=form" target="_blank" ' +
+        'class="btn btn-ghost" style="width:100%;justify-content:center;">Open Ticket in Odoo →</a></div>';
+
     document.getElementById('panelBody').innerHTML = html;
 }
 
