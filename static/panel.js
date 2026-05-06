@@ -2,6 +2,7 @@
 const taskMap = {};
 let fieldOptions = null;
 let currentTaskId = null;
+let panelOriginalValues = {};
 
 // Score thresholds (percentile-based, loaded from server)
 let scoreThresholds = {critical: 10, high: 20, medium: 30};
@@ -81,29 +82,36 @@ function renderPanel(task, messages) {
         '<input type="text" name="name" value="' + escAttr(task.name || '') + '" class="panel-input"></div>';
     html += '<div class="panel-grid">';
 
-    const custId = task.x_studio_customer ? (Array.isArray(task.x_studio_customer) ? task.x_studio_customer[0] : task.x_studio_customer) : '';
-    html += panelSelect('Customer', 'x_studio_customer', custId, opts.customers || [], 'id', 'name',
-        'The customer this task is for. Affects priority score.');
+    const hasTicket = !!(task.helpdesk_ticket_id && task.helpdesk_ticket_id !== false);
+
+    // Task-level fields (always shown)
     const stageId = task.stage_id ? (Array.isArray(task.stage_id) ? task.stage_id[0] : task.stage_id) : '';
     html += panelSelect('Status', 'stage_id', stageId, opts.stages || [], 'id', 'name',
         'Current workflow stage of the task.');
     const assigneeId = task.user_ids && task.user_ids.length > 0 ? task.user_ids[0] : '';
     html += panelSelect('Assignee', 'user_id', assigneeId, opts.users || [], 'id', 'name',
         'The developer assigned to this task. Used for Gantt grouping.');
-    html += panelSelect('Issue Type', 'x_studio_issue_type', task.x_studio_issue_type || '', opts.issue_types || [], 'value', 'label',
-        'Classification of the issue. System-stopping bugs score highest priority.');
-    html += panelBool('Escalated', 'x_studio_related_field_5vi_1jnfmj9cf', task.x_studio_related_field_5vi_1jnfmj9cf,
-        'Escalated items receive a higher priority score.');
-    html += panelSelect('Customer Funded', 'x_studio_related_field_gd_1jnftb4gl', task.x_studio_related_field_gd_1jnftb4gl || '', opts.customer_funded || [], 'value', 'label',
-        'Customer-funded items are boosted in priority.');
     html += panelSelect('Level of Effort', 'x_studio_level_of_effort', task.x_studio_level_of_effort || '', opts.effort_levels || [], 'value', 'label',
         'Estimated work hours. Sets the minimum duration on the Gantt chart.');
-    html += panelBool('Paid Prioritization', 'x_studio_related_field_27d_1jnftbs3p', task.x_studio_related_field_27d_1jnftbs3p,
-        'Paid items receive the highest priority boost (-10 weight).');
     html += panelBool('Roadmap', 'x_studio_road_map_flag', task.x_studio_road_map_flag,
         'Roadmap items are prioritized higher for planned development.');
     html += panelSelect('Priority', 'priority', task.priority || '0', opts.priorities || [], 'value', 'label',
         'Odoo priority level (Low/Medium/High/Urgent).');
+
+    // Ticket-level fields (only shown if linked helpdesk ticket exists)
+    if (hasTicket) {
+        const custId = task.x_studio_customer ? (Array.isArray(task.x_studio_customer) ? task.x_studio_customer[0] : task.x_studio_customer) : '';
+        html += panelSelect('Customer', 'x_studio_customer', custId, opts.customers || [], 'id', 'name',
+            'The customer this task is for. Affects priority score.');
+        html += panelSelect('Issue Type', 'x_studio_issue_type', task.x_studio_issue_type || '', opts.issue_types || [], 'value', 'label',
+            'Classification of the issue. System-stopping bugs score highest priority.');
+        html += panelBool('Escalated', 'x_studio_related_field_5vi_1jnfmj9cf', task.x_studio_related_field_5vi_1jnfmj9cf,
+            'Escalated items receive a higher priority score.');
+        html += panelSelect('Customer Funded', 'x_studio_related_field_gd_1jnftb4gl', task.x_studio_related_field_gd_1jnftb4gl || '', opts.customer_funded || [], 'value', 'label',
+            'Customer-funded items are boosted in priority.');
+        html += panelBool('Paid Prioritization', 'x_studio_related_field_27d_1jnftbs3p', task.x_studio_related_field_27d_1jnftbs3p,
+            'Paid items receive the highest priority boost (-10 weight).');
+    }
     html += panelReadonly('Age', task._age || '—',
         'Days since creation. Older items score higher priority.');
     html += panelReadonly('Created', task.create_date ? task.create_date.slice(0, 10) : '—',

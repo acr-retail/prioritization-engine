@@ -787,9 +787,7 @@ async def update_task(request: Request, task_id: int):
                 raise HTTPException(status_code=400, detail=f"Ticket update failed: {e}")
         else:
             logging.warning(f"Task {task_id} has no linked helpdesk ticket — "
-                            f"cannot update ticket fields: {list(ticket_values.keys())}")
-            raise HTTPException(status_code=400,
-                detail=f"Task has no linked helpdesk ticket. Cannot save: Customer, Issue Type, Customer Funded, Escalated, Paid Prioritization. These fields live on the helpdesk ticket.")
+                            f"skipping ticket fields: {list(ticket_values.keys())}")
 
     # Invalidate task cache since data changed
     cache_clear(creds["uid"], "open_tasks")
