@@ -116,7 +116,7 @@ EXCLUDED_STAGES = {"Complete", "Complete_1", "Cancelled"}
 
 # Fields to pull from project.task
 TASK_FIELDS = [
-    "id", "name", "stage_id", "create_date", "user_ids",
+    "id", "name", "stage_id", "create_date", "user_ids", "project_id",
     "x_studio_customer",
     "x_studio_issue_type",
     "x_studio_level_of_effort",
@@ -313,6 +313,9 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
             task["_customer"] = cust[1]
         elif cust and cust is not False:
             task["_customer"] = str(cust)
+        proj = task.get("project_id")
+        task["_project"] = proj[1] if isinstance(proj, (list, tuple)) and len(proj) > 1 else "No Project"
+        task["_project_id"] = proj[0] if isinstance(proj, (list, tuple)) and len(proj) > 0 else 0
     tasks.sort(key=lambda t: t["_score"])
     return tasks
 
@@ -1023,6 +1026,47 @@ async def api_ticket_detail(request: Request, ticket_id: int):
             msg["_author"] = "System"
 
     return {"ticket": ticket, "messages": messages}
+
+
+@app.get("/api/project/{project_id}")
+async def api_project_detail(request: Request, project_id: int):
+    """Fetch project details and its open tasks."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    projects = odoo_search_read(
+        creds["uid"], creds["api_key"], "project.project",
+        [("id", "=", project_id)],
+        ["name", "user_id", "partner_id", "date_start", "date",
+         "task_count", "description"],
+        limit=1,
+    )
+
+    if not projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = projects[0]
+
+    # Get open tasks in this project
+    tasks = odoo_search_read(
+        creds["uid"], creds["api_key"], "project.task",
+        [("project_id", "=", project_id),
+         ("stage_id.name", "not in", list(EXCLUDED_STAGES))],
+        ["id", "name", "stage_id", "user_ids", "x_studio_issue_type",
+         "x_studio_level_of_effort", "create_date"],
+    )
+
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+
+    for t in tasks:
+        t["_score"] = score_task(t, weight_map, sel_labels)
+        t["_stage"] = t["stage_id"][1] if isinstance(t.get("stage_id"), (list, tuple)) else ""
+
+    tasks.sort(key=lambda t: t["_score"])
+
+    return {"project": project, "tasks": tasks}
 
 
 @app.post("/api/task/{task_id}/comment")

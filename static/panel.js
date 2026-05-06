@@ -130,6 +130,77 @@ function renderTicketPanel(ticket, messages) {
     document.getElementById('panelBody').innerHTML = html;
 }
 
+function openProjectPanel(projectId) {
+    document.getElementById('panelTitle').textContent = 'Project';
+    document.getElementById('panelScore').innerHTML = '';
+    document.getElementById('panelBody').innerHTML =
+        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
+    document.getElementById('panelOverlay').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+
+    fetch('/api/project/' + projectId)
+        .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
+        .then(data => renderProjectPanel(data.project, data.tasks))
+        .catch(err => {
+            document.getElementById('panelBody').innerHTML =
+                '<div class="error">' + escHtml(err.message) + '</div>';
+        });
+}
+
+function renderProjectPanel(project, tasks) {
+    document.getElementById('panelTitle').textContent = project.name;
+    document.getElementById('panelScore').innerHTML =
+        '<span style="font-size:0.85rem;color:#64748b;">' + tasks.length + ' open tasks</span>';
+
+    let html = '';
+
+    // Project info
+    const manager = project.user_id ? (Array.isArray(project.user_id) ? project.user_id[1] : project.user_id) : '—';
+    const customer = project.partner_id ? (Array.isArray(project.partner_id) ? project.partner_id[1] : project.partner_id) : '—';
+
+    html += '<div class="panel-grid">';
+    html += panelReadonly('Manager', manager, 'Project manager in Odoo.');
+    html += panelReadonly('Customer', customer, 'Customer associated with this project.');
+    html += panelReadonly('Start Date', project.date_start || '—', 'Project start date.');
+    html += panelReadonly('End Date', project.date || '—', 'Project end date.');
+    html += panelReadonly('Total Tasks', project.task_count || 0, 'Total tasks in this project (including closed).');
+    html += panelReadonly('Open Tasks', tasks.length, 'Currently open tasks.');
+    html += '</div>';
+
+    // Description
+    if (project.description && project.description !== '<p><br></p>' && project.description !== false) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label">Description</div>' +
+            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;">' + project.description + '</div></div>';
+    }
+
+    // Task list
+    if (tasks.length > 0) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Open Tasks (' + tasks.length + ')</div>';
+
+        tasks.forEach(t => {
+            const cls = getScoreClass(t._score);
+            html += '<div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid #f1f5f9;cursor:pointer;" ' +
+                'onclick="openPanel(' + t.id + ')">' +
+                '<span class="score ' + cls + '" style="font-size:0.7rem;min-width:24px;">' + t._score + '</span>' +
+                '<span style="font-size:0.8rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(t.name) + '</span>' +
+                '<span class="badge badge-gray" style="font-size:0.65rem;">' + escHtml(t._stage) + '</span>' +
+                '</div>';
+        });
+
+        html += '</div>';
+    }
+
+    // Link to Odoo
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<a href="https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com/web#id=' +
+        project.id + '&model=project.project&view_type=form" target="_blank" ' +
+        'class="btn btn-ghost" style="width:100%;justify-content:center;">Open Project in Odoo →</a></div>';
+
+    document.getElementById('panelBody').innerHTML = html;
+}
+
 function closePanel() {
     document.getElementById('panelOverlay').classList.remove('open');
     document.getElementById('detailPanel').classList.remove('open');

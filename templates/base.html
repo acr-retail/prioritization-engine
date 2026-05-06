@@ -448,6 +448,23 @@
             to { transform: rotate(360deg); }
         }
 
+        /* Project group rows in backlog */
+        .project-group-row td {
+            background: #f1f5f9;
+            font-weight: 700;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .project-group-row:hover td { background: #e2e8f0; }
+        .project-group-row .collapse-icon {
+            display: inline-block;
+            transition: transform 0.15s;
+            margin-right: 0.3rem;
+            font-size: 0.7rem;
+        }
+        .project-group-row.collapsed .collapse-icon { transform: rotate(-90deg); }
+
         /* Bulk edit mode */
         .bulk-mode tr { cursor: pointer; }
         .bulk-mode tr:hover { background: #eff6ff; }

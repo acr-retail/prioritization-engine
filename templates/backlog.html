@@ -52,9 +52,15 @@ if (!window.location.search.includes('view=')) {
         </div>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
             <div style="display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;font-size:0.8rem;">
-                <a href="/backlog?view=tasks" onclick="localStorage.setItem('backlogView','tasks')" class="btn btn-sm {% if view_mode == 'tasks' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;">Tasks</a>
-                <a href="/backlog?view=tickets" onclick="localStorage.setItem('backlogView','tickets')" class="btn btn-sm {% if view_mode == 'tickets' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;border-left:1px solid #e2e8f0;">Tickets</a>
+                <a href="/backlog?view=tasks" onclick="localStorage.setItem('backlogView','tasks')" class="btn btn-sm {% if view_mode == 'tasks' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;">Projects</a>
+                <a href="/backlog?view=tickets" onclick="localStorage.setItem('backlogView','tickets')" class="btn btn-sm {% if view_mode == 'tickets' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:0;border:none;border-left:1px solid #e2e8f0;">Helpdesk</a>
             </div>
+            {% if view_mode == 'tasks' %}
+            <div style="display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;font-size:0.75rem;">
+                <button class="btn btn-sm btn-primary" id="subViewGrouped" onclick="setSubView('grouped')" style="border-radius:0;border:none;">Grouped</button>
+                <button class="btn btn-sm btn-ghost" id="subViewPrioritized" onclick="setSubView('prioritized')" style="border-radius:0;border:none;border-left:1px solid #e2e8f0;">Prioritized</button>
+            </div>
+            {% endif %}
             <button class="btn btn-ghost" onclick="refreshBacklog()">Refresh</button>
             <button class="btn btn-ghost" onclick="openClosedLookup()">View Closed Ticket</button>
             <button class="btn btn-ghost" id="bulkEditToggle" onclick="toggleBulkMode()">Bulk Edit</button>
@@ -183,7 +189,7 @@ function toggleBacklogHelp() {
         </thead>
         <tbody>
             {% for task in tasks %}
-            <tr onclick="handleRowClick(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')" data-task-id="{{ task.id }}" data-item-type="{{ task.get('_item_type', 'task') }}">
+            <tr onclick="handleRowClick(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')" data-task-id="{{ task.id }}" data-item-type="{{ task.get('_item_type', 'task') }}" data-project="{{ task.get('_project', '') }}" data-project-id="{{ task.get('_project_id', 0) }}">
                 <td>
                     <span class="score
                         {% if task._score < thresholds.critical %}score-critical
@@ -538,5 +544,89 @@ headers.forEach(th => {
         rows.forEach(r => tbody.appendChild(r));
     });
 });
+
+// ---- Sub-view: Grouped vs Prioritized (Projects tab only) ----
+let currentSubView = localStorage.getItem('projectSubView') || 'grouped';
+
+function setSubView(mode) {
+    currentSubView = mode;
+    localStorage.setItem('projectSubView', mode);
+    const gBtn = document.getElementById('subViewGrouped');
+    const pBtn = document.getElementById('subViewPrioritized');
+    if (gBtn && pBtn) {
+        gBtn.className = 'btn btn-sm ' + (mode === 'grouped' ? 'btn-primary' : 'btn-ghost');
+        pBtn.className = 'btn btn-sm ' + (mode === 'prioritized' ? 'btn-primary' : 'btn-ghost');
+    }
+    applySubView();
+}
+
+function applySubView() {
+    const tbody = document.querySelector('#backlog-table tbody');
+    if (!tbody) return;
+
+    // Remove any existing group rows
+    tbody.querySelectorAll('.project-group-row').forEach(r => r.remove());
+
+    const dataRows = Array.from(tbody.querySelectorAll('tr[data-task-id]'));
+
+    if (currentSubView === 'grouped') {
+        // Sort by project then score
+        dataRows.sort((a, b) => {
+            const pa = a.dataset.project || 'zzz';
+            const pb = b.dataset.project || 'zzz';
+            if (pa !== pb) return pa.localeCompare(pb);
+            const sa = parseInt(a.cells[0]?.textContent) || 0;
+            const sb = parseInt(b.cells[0]?.textContent) || 0;
+            return sa - sb;
+        });
+
+        // Reinsert sorted rows and add group headers
+        let lastProject = null;
+        const colCount = dataRows[0] ? dataRows[0].cells.length : 15;
+
+        dataRows.forEach(row => {
+            const proj = row.dataset.project || 'No Project';
+            const projId = row.dataset.projectId || '0';
+
+            if (proj !== lastProject) {
+                // Count tasks in this project
+                const count = dataRows.filter(r => (r.dataset.project || 'No Project') === proj).length;
+
+                const groupRow = document.createElement('tr');
+                groupRow.className = 'project-group-row';
+                groupRow.dataset.projectGroup = proj;
+                groupRow.innerHTML = '<td colspan="' + colCount + '">' +
+                    '<span class="collapse-icon" onclick="toggleProjectGroup(this.closest(\'tr\'))" style="cursor:pointer;">▼</span> ' +
+                    '<span onclick="if('+projId+')openProjectPanel('+projId+')" style="cursor:pointer;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;">' +
+                    escHtml(proj) + '</span> <span style="font-weight:400;color:#64748b;cursor:pointer;" onclick="toggleProjectGroup(this.closest(\'tr\'))">(' + count + ' tasks)</span></td>';
+                tbody.appendChild(groupRow);
+                lastProject = proj;
+            }
+            tbody.appendChild(row);
+        });
+    } else {
+        // Prioritized: sort by score
+        dataRows.sort((a, b) => {
+            const sa = parseInt(a.cells[0]?.textContent) || 0;
+            const sb = parseInt(b.cells[0]?.textContent) || 0;
+            return sa - sb;
+        });
+        dataRows.forEach(row => tbody.appendChild(row));
+    }
+}
+
+function toggleProjectGroup(groupRow) {
+    const isCollapsed = groupRow.classList.toggle('collapsed');
+    let sibling = groupRow.nextElementSibling;
+    while (sibling && !sibling.classList.contains('project-group-row')) {
+        sibling.style.display = isCollapsed ? 'none' : '';
+        sibling = sibling.nextElementSibling;
+    }
+}
+
+// Initialize sub-view on page load (only for projects tab)
+if (document.getElementById('subViewGrouped')) {
+    setSubView(currentSubView);
+}
 </script>
 {% endblock %}
