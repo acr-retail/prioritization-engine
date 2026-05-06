@@ -8,6 +8,7 @@ import xmlrpc.client
 from datetime import date
 from pathlib import Path
 
+import time as _time
 from collections import defaultdict
 from datetime import datetime as dt
 
@@ -31,6 +32,77 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 # Active user presence: login → last_seen timestamp
 active_users: dict[str, float] = {}
 PRESENCE_TIMEOUT = 120  # seconds
+
+# ---------------------------------------------------------------------------
+# Server-side data cache (per-user, 15 min TTL)
+# ---------------------------------------------------------------------------
+DATA_CACHE_TTL = 15 * 60  # seconds
+_data_cache: dict[int, dict] = {}  # uid → {key: {data, ts}}
+
+
+def cache_get(uid: int, key: str):
+    """Get cached data for a user. Returns None if expired or missing."""
+    user_cache = _data_cache.get(uid)
+    if not user_cache:
+        return None
+    entry = user_cache.get(key)
+    if not entry:
+        return None
+    if _time.time() - entry["ts"] > DATA_CACHE_TTL:
+        del user_cache[key]
+        return None
+    return entry["data"]
+
+
+def cache_set(uid: int, key: str, data):
+    """Store data in the cache for a user."""
+    if uid not in _data_cache:
+        _data_cache[uid] = {}
+    _data_cache[uid][key] = {"data": data, "ts": _time.time()}
+
+
+def cache_clear(uid: int, key: str = None):
+    """Clear cache for a user. If key is None, clear all."""
+    if key:
+        if uid in _data_cache and key in _data_cache[uid]:
+            del _data_cache[uid][key]
+    elif uid in _data_cache:
+        del _data_cache[uid]
+
+
+def get_open_tasks_cached(uid: int, api_key: str, extra_fields: list = None):
+    """Get open tasks with caching."""
+    cache_key = "open_tasks" + ("_gantt" if extra_fields else "")
+    cached = cache_get(uid, cache_key)
+    if cached is not None:
+        return cached
+
+    fields = TASK_FIELDS + (extra_fields or [])
+    tasks = odoo_search_read(uid, api_key, "project.task",
+                             [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
+                             fields)
+    cache_set(uid, cache_key, tasks)
+    return tasks
+
+
+def get_weight_map_cached(uid: int, api_key: str):
+    """Get weight map with caching."""
+    cached = cache_get(uid, "weight_map")
+    if cached is not None:
+        return cached
+    wm = load_weight_map(uid, api_key)
+    cache_set(uid, "weight_map", wm)
+    return wm
+
+
+def get_sel_labels_cached(uid: int, api_key: str):
+    """Get selection labels with caching."""
+    cached = cache_get(uid, "sel_labels")
+    if cached is not None:
+        return cached
+    sl = get_selection_labels(uid, api_key)
+    cache_set(uid, "sel_labels", sl)
+    return sl
 
 ODOO_URL = os.environ.get("ODOO_URL", "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com")
 ODOO_DB = os.environ.get("ODOO_DB", "odoo-ps-psus-all-about-technology-sandbox-30173849")
@@ -220,8 +292,11 @@ def score_task(task: dict, weight_map: dict, sel_labels: dict = None) -> int:
     for field_name, config in weight_map.items():
         display_val = get_field_display(task, field_name, config["field_type"],
                                         sel_labels)
-        if display_val in config["values"]:
+        if display_val and display_val in config["values"]:
             score += config["values"][display_val]
+        elif not display_val and "Not Set" in config["values"]:
+            # Empty/unset field — use the "Not Set" weight
+            score += config["values"]["Not Set"]
     return score
 
 
@@ -230,6 +305,7 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
     for task in tasks:
         task["_score"] = score_task(task, weight_map, sel_labels)
         task["_age"] = compute_age_bracket(task.get("create_date", ""))
+        task["_grooming"] = compute_grooming(task)
         task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
         task["_customer"] = ""
         cust = task.get("x_studio_customer")
@@ -239,6 +315,58 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
             task["_customer"] = str(cust)
     tasks.sort(key=lambda t: t["_score"])
     return tasks
+
+
+def resolve_user_names(tasks: list, uid: int, api_key: str):
+    """Add _assignee and _assignee_id to tasks by resolving user_ids."""
+    # Collect all user IDs
+    all_user_ids = set()
+    for t in tasks:
+        uids = t.get("user_ids", [])
+        if isinstance(uids, list):
+            all_user_ids.update(uids)
+
+    # Fetch user names (cached)
+    user_names = cache_get(uid, "user_names")
+    if user_names is None:
+        user_names = {}
+        if all_user_ids:
+            users = odoo_search_read(uid, api_key, "res.users",
+                                     [("id", "in", list(all_user_ids))], ["name"])
+            user_names = {u["id"]: u["name"] for u in users}
+        cache_set(uid, "user_names", user_names)
+
+    # Add to tasks
+    for t in tasks:
+        uids = t.get("user_ids", [])
+        if uids and isinstance(uids, list) and uids[0] in user_names:
+            t["_assignee"] = user_names[uids[0]]
+            t["_assignee_id"] = uids[0]
+        else:
+            t["_assignee"] = "Unassigned"
+            t["_assignee_id"] = 0
+
+
+# Fields required for a task to be considered "groomed"
+GROOMING_FIELDS = {
+    "x_studio_issue_type": "Issue Type",
+    "x_studio_level_of_effort": "Level of Effort",
+    "x_studio_customer": "Customer",
+}
+
+
+def compute_grooming(task: dict) -> dict:
+    """Check which grooming fields are missing on a task."""
+    missing = []
+    for field, label in GROOMING_FIELDS.items():
+        val = task.get(field)
+        if val is False or val is None or val == "":
+            missing.append(label)
+    return {
+        "groomed": len(missing) == 0,
+        "missing": missing,
+        "missing_count": len(missing),
+    }
 
 
 def compute_score_thresholds(tasks: list) -> dict:
@@ -321,18 +449,15 @@ async def backlog(request: Request):
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    # Pull open tasks from Odoo
-    tasks = odoo_search_read(
-        creds["uid"], creds["api_key"], "project.task",
-        [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
-        TASK_FIELDS,
-    )
-
-    weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    # Pull open tasks (cached)
+    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    # Deep copy so enrichment doesn't mutate cache
+    tasks = [dict(t) for t in tasks]
     tasks = enrich_tasks(tasks, weight_map, sel_labels)
+    resolve_user_names(tasks, creds["uid"], creds["api_key"])
 
-    # Build JSON-safe version for the detail panel
     task_json = json.dumps(tasks, default=str)
 
     thresholds = compute_score_thresholds(tasks)
@@ -353,48 +478,18 @@ async def gantt_page(request: Request):
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    # Pull open tasks with date fields
-    gantt_fields = TASK_FIELDS + [
-        "planned_date_begin", "date_end", "date_deadline", "user_ids",
-    ]
-    tasks = odoo_search_read(
-        creds["uid"], creds["api_key"], "project.task",
-        [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
-        gantt_fields,
-    )
-
-    weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    # Pull open tasks with date fields (cached)
+    gantt_extra = ["planned_date_begin", "date_end", "date_deadline", "user_ids"]
+    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"], extra_fields=gantt_extra)
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    tasks = [dict(t) for t in tasks]
     tasks = enrich_tasks(tasks, weight_map, sel_labels)
+    resolve_user_names(tasks, creds["uid"], creds["api_key"])
 
-    # Fetch user names for grouping
-    all_user_ids = set()
-    for t in tasks:
-        uids = t.get("user_ids", [])
-        if isinstance(uids, list):
-            all_user_ids.update(uids)
-
-    user_names = {}
-    if all_user_ids:
-        users = odoo_search_read(
-            creds["uid"], creds["api_key"], "res.users",
-            [("id", "in", list(all_user_ids))],
-            ["name"],
-        )
-        for u in users:
-            user_names[u["id"]] = u["name"]
-
-    # Enrich with user name and default dates
+    # Default dates for gantt
     today = date.today().isoformat()
     for t in tasks:
-        uids = t.get("user_ids", [])
-        if uids and isinstance(uids, list) and uids[0] in user_names:
-            t["_assignee"] = user_names[uids[0]]
-            t["_assignee_id"] = uids[0]
-        else:
-            t["_assignee"] = "Unassigned"
-            t["_assignee_id"] = 0
-
         # Minimum duration from Level of Effort
         effort = t.get("x_studio_level_of_effort", "")
         effort_days_map = {"<10 Hrs": 1, "10-40 Hrs": 5, "41-100 Hrs": 12, ">100 Hrs": 25}
@@ -425,7 +520,6 @@ async def gantt_page(request: Request):
         "task_json": task_json,
         "login": creds["login"],
         "task_count": len(tasks),
-        "user_names": user_names,
     })
 
 
@@ -440,14 +534,12 @@ async def api_recalculate_scores(request: Request):
     global _selection_labels_cache
     _selection_labels_cache = None
 
-    tasks = odoo_search_read(
-        creds["uid"], creds["api_key"], "project.task",
-        [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
-        TASK_FIELDS,
-    )
+    # Clear all caches to force fresh data
+    cache_clear(creds["uid"])
 
-    weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
 
     scored_tasks = []
     scores = {}
@@ -490,6 +582,8 @@ async def api_update_task_dates(request: Request, task_id: int):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
     return {"ok": True}
 
 
@@ -518,6 +612,10 @@ async def update_weight(request: Request, weight_id: int, weight: int = Form(...
                    {"x_weight": weight})
     except Exception as e:
         return RedirectResponse(f"/config?error={str(e)}", status_code=303)
+
+    # Invalidate weight cache for all users
+    for uid_key in list(_data_cache.keys()):
+        cache_clear(uid_key, "weight_map")
 
     return RedirectResponse("/config", status_code=303)
 
@@ -693,6 +791,10 @@ async def update_task(request: Request, task_id: int):
             raise HTTPException(status_code=400,
                 detail=f"Task has no linked helpdesk ticket. Cannot save: Customer, Issue Type, Customer Funded, Escalated, Paid Prioritization. These fields live on the helpdesk ticket.")
 
+    # Invalidate task cache since data changed
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
+
     return {"ok": True, "updated": updated}
 
 
@@ -769,8 +871,8 @@ async def api_task_detail(request: Request, task_id: int):
             msg["_author"] = "System"
 
     # Compute score
-    weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
     task["_score"] = score_task(task, weight_map, sel_labels)
     task["_age"] = compute_age_bracket(task.get("create_date", ""))
     task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
@@ -778,6 +880,7 @@ async def api_task_detail(request: Request, task_id: int):
     cust = task.get("x_studio_customer")
     if isinstance(cust, (list, tuple)) and len(cust) > 1:
         task["_customer"] = cust[1]
+    task["_grooming"] = compute_grooming(task)
 
     return {
         "task": task,
@@ -872,6 +975,8 @@ async def api_bulk_update(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
     return {"ok": True, "updated": len(task_ids)}
 
 
@@ -929,8 +1034,8 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
     )
     if tasks:
         task_data = tasks[0]
-        weight_map = load_weight_map(creds["uid"], creds["api_key"])
-        sel_labels_lookup = get_selection_labels(creds["uid"], creds["api_key"])
+        weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
+        sel_labels_lookup = get_sel_labels_cached(creds["uid"], creds["api_key"])
         task_data["_score"] = score_task(task_data, weight_map, sel_labels_lookup)
         task_data["_age"] = compute_age_bracket(task_data.get("create_date", ""))
 

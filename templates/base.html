@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ACR Prioritization{% endblock %}</title>
+    <link rel="shortcut icon" href="/static/favicon.ico">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -263,6 +264,10 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
+
+        .stat-link { cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 6px; transition: background 0.15s; }
+        .stat-link:hover { background: #f1f5f9; }
+        .stat-link.active { background: #e2e8f0; }
 
         /* Slide-in detail panel */
         .panel-overlay {

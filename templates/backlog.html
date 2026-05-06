@@ -22,34 +22,92 @@
             {% set high = tasks | selectattr("_score", "ge", t_crit) | selectattr("_score", "lt", t_high) | list | length %}
             {% set medium = tasks | selectattr("_score", "ge", t_high) | selectattr("_score", "lt", t_med) | list | length %}
             {% set low = tasks | selectattr("_score", "ge", t_med) | list | length %}
-            <div class="stat">
+            <div class="stat stat-link" onclick="filterByPriority('critical')" title="Show only critical tasks">
                 <div class="stat-value" style="color: #dc2626;">{{ critical }}</div>
                 <div class="stat-label">Critical (&lt;{{ t_crit }})</div>
             </div>
-            <div class="stat">
+            <div class="stat stat-link" onclick="filterByPriority('high')" title="Show only high priority tasks">
                 <div class="stat-value" style="color: #ea580c;">{{ high }}</div>
                 <div class="stat-label">High ({{ t_crit }}-{{ t_high - 1 }})</div>
             </div>
-            <div class="stat">
+            <div class="stat stat-link" onclick="filterByPriority('medium')" title="Show only medium priority tasks">
                 <div class="stat-value" style="color: #ca8a04;">{{ medium }}</div>
                 <div class="stat-label">Medium ({{ t_high }}-{{ t_med - 1 }})</div>
             </div>
-            <div class="stat">
+            <div class="stat stat-link" onclick="filterByPriority('low')" title="Show only low priority tasks">
                 <div class="stat-value" style="color: #16a34a;">{{ low }}</div>
                 <div class="stat-label">Low ({{ t_med }}+)</div>
             </div>
-            <div class="stat">
+            <div class="stat stat-link" onclick="filterByPriority('all')" title="Show all tasks">
                 <div class="stat-value">{{ task_count }}</div>
                 <div class="stat-label">Total</div>
             </div>
         </div>
-        <div style="display:flex;gap:0.5rem;">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
             <button class="btn btn-ghost" onclick="refreshBacklog()">Refresh</button>
             <button class="btn btn-ghost" onclick="openClosedLookup()">View Closed Ticket</button>
             <button class="btn btn-ghost" id="bulkEditToggle" onclick="toggleBulkMode()">Bulk Edit</button>
+            <button class="btn btn-ghost" id="groomToggle" onclick="toggleGroomFilter()">Show Ungroomed</button>
+            <button class="btn btn-ghost" id="hideUngroomedToggle" onclick="toggleHideUngroomed()">Hide Ungroomed</button>
+            <button class="btn btn-ghost" onclick="toggleBacklogHelp()">Help</button>
         </div>
     </div>
 </div>
+
+<div id="backlogHelp" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1rem;font-size:0.8rem;color:#374151;line-height:1.7;position:relative;">
+    <button onclick="toggleBacklogHelp()" style="position:absolute;top:0.75rem;right:1rem;background:none;border:none;font-size:1.1rem;cursor:pointer;color:#94a3b8;">✕</button>
+    <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.75rem;">How the Prioritized Backlog Works</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem 2rem;">
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Priority Scoring</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li>Every task gets a <strong>priority score</strong> based on its attributes (customer, issue type, escalation, etc.)</li>
+                <li><strong>Lower score = higher priority</strong> — tasks are sorted lowest first</li>
+                <li>Scores are calculated using configurable weights on the <strong>Weights</strong> page</li>
+                <li>Negative weights (e.g. paid prioritization, customer funded) push items to the top</li>
+                <li>Score thresholds for Critical/High/Medium/Low are calculated from the actual distribution of all task scores (percentile-based)</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Grooming</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li>A task is <strong>"groomed"</strong> when it has <strong>Issue Type</strong>, <strong>Level of Effort</strong>, and <strong>Customer</strong> filled in</li>
+                <li>Ungroomed tasks show a purple <span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.3rem;border-radius:9999px;font-size:0.65rem;font-weight:600;">N missing</span> badge — hover to see which fields are empty</li>
+                <li>Empty fields score <strong>10 points each</strong> (configurable on the Weights page as "Not Set"), pushing ungroomed items toward the bottom</li>
+                <li><strong>Show Ungroomed</strong> filters to only show tasks that need grooming</li>
+                <li><strong>Hide Ungroomed</strong> hides ungroomed tasks so you see only actionable items</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Editing Tasks</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Click a cell</strong> to edit it inline — dropdowns for selections, text input for title</li>
+                <li>Changes save to Odoo automatically and the score recalculates</li>
+                <li><strong>Click the Score or ID</strong> to open the full task editor panel with all fields, description, and conversation</li>
+                <li>The editor panel also lets you post comments directly to the Odoo task</li>
+                <li>Hover the <span class="panel-tooltip" style="display:inline-flex;width:14px;height:14px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:0.55rem;font-weight:700;align-items:center;justify-content:center;">?</span> icons in the editor to see what each field affects</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Other Features</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Sort</strong> — click any column header to sort ascending/descending</li>
+                <li><strong>Filter</strong> — use the dropdown row below headers to filter by any column value</li>
+                <li><strong>Bulk Edit</strong> — enter bulk mode, click rows to select, then change status or assignee for all selected at once</li>
+                <li><strong>View Closed Ticket</strong> — look up a closed ticket by its ID number, view its history, and reopen it if needed</li>
+                <li><strong>Refresh</strong> — reload all task data from Odoo</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleBacklogHelp() {
+    const el = document.getElementById('backlogHelp');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
 
 <!-- Bulk Edit Bar -->
 <div id="bulkBar" style="display:none;background:#111;color:#fff;padding:0.75rem 1rem;border-radius:8px;
@@ -78,25 +136,27 @@
     <table id="backlog-table">
         <thead>
             <tr>
-                <th class="sortable sort-asc" data-col="0" data-type="num">Score</th>
-                <th class="sortable" data-col="1" data-type="num">ID</th>
-                <th class="sortable" data-col="2" data-type="str">Title</th>
-                <th class="sortable" data-col="3" data-type="str">Customer</th>
-                <th class="sortable" data-col="4" data-type="str">Status</th>
-                <th class="sortable" data-col="5" data-type="str">Type</th>
-                <th class="sortable" data-col="6" data-type="str">Esc.</th>
-                <th class="sortable" data-col="7" data-type="str">Funded</th>
-                <th class="sortable" data-col="8" data-type="str">Effort</th>
-                <th class="sortable" data-col="9" data-type="str">Paid</th>
-                <th class="sortable" data-col="10" data-type="str">Roadmap</th>
-                <th class="sortable" data-col="11" data-type="str">Age</th>
-                <th class="sortable" data-col="12" data-type="str">Created</th>
+                <th class="sortable sort-asc" data-col="0">Score</th>
+                <th data-col="1">Groom</th>
+                <th class="sortable" data-col="2">ID</th>
+                <th class="sortable" data-col="2">Title</th>
+                <th class="sortable" data-col="3">Customer</th>
+                <th class="sortable" data-col="4">Status</th>
+                <th class="sortable" data-col="5">Type</th>
+                <th class="sortable" data-col="6">Esc.</th>
+                <th class="sortable" data-col="7">Funded</th>
+                <th class="sortable" data-col="8">Effort</th>
+                <th class="sortable" data-col="9">Paid</th>
+                <th class="sortable" data-col="10">Roadmap</th>
+                <th class="sortable" data-col="11">Assignee</th>
+                <th class="sortable" data-col="12">Age</th>
+                <th class="sortable" data-col="13">Created</th>
             </tr>
             <tr class="filter-row">
                 <th><select data-col="0"><option value="">All</option></select></th>
                 <th></th>
                 <th></th>
-                <th><select data-col="3"><option value="">All</option></select></th>
+                <th></th>
                 <th><select data-col="4"><option value="">All</option></select></th>
                 <th><select data-col="5"><option value="">All</option></select></th>
                 <th><select data-col="6"><option value="">All</option></select></th>
@@ -106,6 +166,8 @@
                 <th><select data-col="10"><option value="">All</option></select></th>
                 <th><select data-col="11"><option value="">All</option></select></th>
                 <th><select data-col="12"><option value="">All</option></select></th>
+                <th><select data-col="13"><option value="">All</option></select></th>
+                <th><select data-col="14"><option value="">All</option></select></th>
             </tr>
         </thead>
         <tbody>
@@ -119,6 +181,13 @@
                         {% else %}score-low{% endif %}">
                         {{ task._score }}
                     </span>
+                </td>
+                <td style="font-size: 0.7rem; text-align: center;" title="{{ task._grooming.missing | join(', ') if task._grooming.missing else 'Fully groomed' }}">
+                    {% if not task._grooming.groomed %}
+                    <span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.4rem;border-radius:9999px;font-weight:600;font-size:0.65rem;" data-ungroomed="true">{{ task._grooming.missing_count }} missing</span>
+                    {% else %}
+                    <span style="color:#d4d4d8;">✓</span>
+                    {% endif %}
                 </td>
                 <td style="color: #64748b; font-size: 0.8rem;">{{ task.id }}</td>
                 <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
@@ -135,6 +204,7 @@
                 <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
                 <td>{% if task.get('x_studio_related_field_27d_1jnftbs3p') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
                 <td>{% if task.get('x_studio_road_map_flag') %}<span class="badge badge-blue">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
+                <td style="font-size:0.8rem;">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray">{{ task._assignee }}</span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
                 <td><span class="badge {% if task._age == '>90' %}badge-yellow{% elif task._age == '60-90' %}badge-blue{% else %}badge-gray{% endif %}">{{ task._age }}</span></td>
                 <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
             </tr>
@@ -161,8 +231,98 @@ window.addEventListener('pageshow', e => { if (e.persisted) document.getElementB
 const tasks = JSON.parse(document.getElementById('taskData').textContent);
 tasks.forEach(t => taskMap[t.id] = t);
 
+// ---- Priority Filter (from stat links) ----
+let activePriorityFilter = 'all';
+
+function filterByPriority(level) {
+    activePriorityFilter = level;
+    const th = scoreThresholds;
+
+    // Update active state on stat links
+    document.querySelectorAll('.stat-link').forEach(el => el.classList.remove('active'));
+    if (level !== 'all') {
+        const labels = {critical: 0, high: 1, medium: 2, low: 3};
+        const links = document.querySelectorAll('.stat-link');
+        if (links[labels[level]]) links[labels[level]].classList.add('active');
+    }
+
+    const rows = document.querySelectorAll('#backlog-table tbody tr');
+    rows.forEach(row => {
+        const scoreEl = row.querySelector('.score');
+        if (!scoreEl) return;
+        const score = parseInt(scoreEl.textContent);
+
+        let show = true;
+        if (level === 'critical') show = score < th.critical;
+        else if (level === 'high') show = score >= th.critical && score < th.high;
+        else if (level === 'medium') show = score >= th.high && score < th.medium;
+        else if (level === 'low') show = score >= th.medium;
+
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+// ---- Grooming Filters ----
+let groomFilter = 'all'; // 'all', 'ungroomed', 'groomed'
+
+function toggleGroomFilter() {
+    const btn = document.getElementById('groomToggle');
+    if (groomFilter === 'ungroomed') {
+        groomFilter = 'all';
+        btn.textContent = 'Show Ungroomed';
+        btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
+    } else {
+        groomFilter = 'ungroomed';
+        btn.textContent = 'Showing Ungroomed';
+        btn.style.background = '#8b5cf6'; btn.style.color = '#fff'; btn.style.borderColor = '#8b5cf6';
+    }
+    // Reset hide toggle
+    const hideBtn = document.getElementById('hideUngroomedToggle');
+    hideBtn.textContent = 'Hide Ungroomed';
+    hideBtn.style.background = ''; hideBtn.style.color = ''; hideBtn.style.borderColor = '';
+    applyGroomFilter();
+}
+
+function toggleHideUngroomed() {
+    const btn = document.getElementById('hideUngroomedToggle');
+    if (groomFilter === 'groomed') {
+        groomFilter = 'all';
+        btn.textContent = 'Hide Ungroomed';
+        btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
+    } else {
+        groomFilter = 'groomed';
+        btn.textContent = 'Hiding Ungroomed';
+        btn.style.background = '#16a34a'; btn.style.color = '#fff'; btn.style.borderColor = '#16a34a';
+    }
+    // Reset show toggle
+    const showBtn = document.getElementById('groomToggle');
+    showBtn.textContent = 'Show Ungroomed';
+    showBtn.style.background = ''; showBtn.style.color = ''; showBtn.style.borderColor = '';
+    applyGroomFilter();
+}
+
+function applyGroomFilter() {
+    const rows = document.querySelectorAll('#backlog-table tbody tr');
+    rows.forEach(row => {
+        const badge = row.querySelector('[data-ungroomed]');
+        const missingCount = badge ? parseInt(badge.textContent) || 0 : 0;
+        if (groomFilter === 'ungroomed') {
+            // Show only items missing 2+ fields
+            row.style.display = missingCount >= 2 ? '' : 'none';
+        } else if (groomFilter === 'groomed') {
+            // Hide items missing 2+ fields (likely need grooming)
+            row.style.display = missingCount >= 2 ? 'none' : '';
+        } else {
+            row.style.display = '';
+        }
+    });
+}
+
 // ---- Row click ----
 function handleRowClick(event, taskId) {
+    // Don't handle if clicking on an inline editor
+    if (event.target.classList.contains('inline-edit') || event.target.closest('.editing')) return;
+
     if (bulkMode) {
         const row = event.currentTarget;
         if (selectedIds.has(taskId)) { selectedIds.delete(taskId); row.classList.remove('selected'); }
