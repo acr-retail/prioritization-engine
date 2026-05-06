@@ -340,9 +340,16 @@ async def api_options(request: Request):
         {"attributes": ["selection"]},
     )
 
+    # Fetch users (assignees)
+    users = odoo_search_read(
+        creds["uid"], creds["api_key"], "res.users",
+        [("share", "=", False)], ["name"], limit=200,
+    )
+
     return {
         "stages": [{"id": s["id"], "name": s["name"]} for s in stages],
         "customers": [{"id": c["id"], "name": c["name"]} for c in customers],
+        "users": [{"id": u["id"], "name": u["name"]} for u in users],
         "issue_types": [
             {"value": s[0], "label": s[1]}
             for s in field_defs.get("x_studio_issue_type", {}).get("selection", [])
@@ -457,7 +464,7 @@ async def api_task_detail(request: Request, task_id: int):
         ],
         ["body", "date", "author_id", "message_type", "subtype_id",
          "attachment_ids"],
-        limit=50,
+        limit=0,
     )
 
     # Sort messages newest first
@@ -502,6 +509,183 @@ async def api_task_detail(request: Request, task_id: int):
 
     return {
         "task": task,
+        "messages": messages,
+    }
+
+
+@app.post("/api/task/{task_id}/comment")
+async def api_post_task_comment(request: Request, task_id: int):
+    """Post a comment to a project.task's chatter as the logged-in user."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    body = data.get("body", "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Comment body is required")
+
+    # Convert newlines to <br> for HTML
+    html_body = body.replace("\n", "<br/>")
+
+    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+    models_proxy.execute_kw(
+        ODOO_DB, creds["uid"], creds["api_key"],
+        "project.task", "message_post", [task_id],
+        {
+            "body": html_body,
+            "message_type": "comment",
+            "subtype_xmlid": "mail.mt_comment",
+        },
+    )
+
+    return {"ok": True}
+
+
+@app.post("/api/ticket/{ticket_id}/comment")
+async def api_post_ticket_comment(request: Request, ticket_id: int):
+    """Post a comment to a helpdesk.ticket's chatter as the logged-in user."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    body = data.get("body", "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Comment body is required")
+
+    html_body = body.replace("\n", "<br/>")
+
+    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+    models_proxy.execute_kw(
+        ODOO_DB, creds["uid"], creds["api_key"],
+        "helpdesk.ticket", "message_post", [ticket_id],
+        {
+            "body": html_body,
+            "message_type": "comment",
+            "subtype_xmlid": "mail.mt_comment",
+        },
+    )
+
+    return {"ok": True}
+
+
+@app.post("/api/tasks/bulk-update")
+async def api_bulk_update(request: Request):
+    """Bulk update multiple project.task records."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    task_ids = data.get("task_ids", [])
+    values = {}
+
+    if data.get("stage_id"):
+        values["stage_id"] = int(data["stage_id"])
+    if data.get("user_ids") is not None:
+        # user_ids is a many2many — use [(6, 0, [ids])] to replace
+        user_list = data["user_ids"]
+        if isinstance(user_list, list):
+            values["user_ids"] = [(6, 0, [int(u) for u in user_list])]
+        elif user_list:
+            values["user_ids"] = [(6, 0, [int(user_list)])]
+
+    if not task_ids or not values:
+        raise HTTPException(status_code=400, detail="task_ids and at least one field required")
+
+    try:
+        odoo_write(creds["uid"], creds["api_key"], "project.task",
+                   [int(t) for t in task_ids], values)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True, "updated": len(task_ids)}
+
+
+@app.post("/api/ticket/{ticket_id}/update-status")
+async def api_update_ticket_status(request: Request, ticket_id: int):
+    """Update a helpdesk ticket's stage."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    stage_id = data.get("stage_id")
+    if not stage_id:
+        raise HTTPException(status_code=400, detail="stage_id is required")
+
+    try:
+        odoo_write(creds["uid"], creds["api_key"], "helpdesk.ticket",
+                   [ticket_id], {"stage_id": int(stage_id)})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True}
+
+
+@app.get("/api/ticket/lookup/{ticket_ref}")
+async def api_ticket_lookup(request: Request, ticket_ref: str):
+    """Look up a helpdesk ticket by ticket_ref (Bugzilla ID) and return
+    full details + messages, same as the task detail endpoint."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Find the helpdesk ticket by ticket_ref
+    tickets = odoo_search_read(
+        creds["uid"], creds["api_key"], "helpdesk.ticket",
+        [("ticket_ref", "=", ticket_ref)],
+        ["id", "name", "ticket_ref", "stage_id", "create_date",
+         "partner_id", "user_id", "description", "priority"],
+        limit=1,
+    )
+
+    if not tickets:
+        raise HTTPException(status_code=404, detail=f"No ticket found with ID #{ticket_ref}")
+
+    ticket = tickets[0]
+
+    # Also try to find a linked project.task
+    task_data = None
+    tasks = odoo_search_read(
+        creds["uid"], creds["api_key"], "project.task",
+        [("helpdesk_ticket_id", "=", ticket["id"])],
+        TASK_FIELDS + ["description", "date_deadline", "date_assign",
+                       "allocated_hours", "effective_hours"],
+        limit=1,
+    )
+    if tasks:
+        task_data = tasks[0]
+        weight_map = load_weight_map(creds["uid"], creds["api_key"])
+        task_data["_score"] = score_task(task_data, weight_map)
+        task_data["_age"] = compute_age_bracket(task_data.get("create_date", ""))
+
+    # Fetch chatter messages from the helpdesk ticket
+    messages = odoo_search_read(
+        creds["uid"], creds["api_key"], "mail.message",
+        [
+            ("res_id", "=", ticket["id"]),
+            ("model", "=", "helpdesk.ticket"),
+            ("message_type", "in", ["comment", "email", "notification"]),
+        ],
+        ["body", "date", "author_id", "message_type", "subtype_id",
+         "attachment_ids"],
+        limit=50,
+    )
+
+    messages.sort(key=lambda m: m.get("date", ""), reverse=True)
+
+    # Enrich messages with author names
+    for msg in messages:
+        if isinstance(msg.get("author_id"), (list, tuple)):
+            msg["_author"] = msg["author_id"][1]
+        else:
+            msg["_author"] = "System"
+
+    return {
+        "ticket": ticket,
+        "task": task_data,
         "messages": messages,
     }
 

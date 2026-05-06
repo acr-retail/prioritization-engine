@@ -3,27 +3,62 @@
 {% block title %}Prioritized Backlog — ACR{% endblock %}
 
 {% block content %}
+<div id="pageLoading" style="display:flex;align-items:center;gap:0.75rem;padding:1rem 0;">
+    <div class="spinner"></div>
+    <span style="font-size:0.85rem;color:#64748b;">Loading tasks from Odoo...</span>
+</div>
+
 <div class="page-header">
     <div>
         <h1>Prioritized Backlog</h1>
         <p class="subtitle">{{ task_count }} open tasks — lowest score = highest priority</p>
     </div>
-    <div class="stats">
-        {% set critical = tasks | selectattr("_score", "lt", 10) | list | length %}
-        {% set high = tasks | selectattr("_score", "lt", 25) | rejectattr("_score", "lt", 10) | list | length %}
-        <div class="stat">
-            <div class="stat-value" style="color: #dc2626;">{{ critical }}</div>
-            <div class="stat-label">Critical</div>
+    <div style="display:flex;align-items:center;gap:1.5rem;">
+        <div class="stats">
+            {% set critical = tasks | selectattr("_score", "lt", 10) | list | length %}
+            {% set high = tasks | selectattr("_score", "lt", 25) | rejectattr("_score", "lt", 10) | list | length %}
+            <div class="stat">
+                <div class="stat-value" style="color: #dc2626;">{{ critical }}</div>
+                <div class="stat-label">Critical</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" style="color: #ea580c;">{{ high }}</div>
+                <div class="stat-label">High</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ task_count }}</div>
+                <div class="stat-label">Total</div>
+            </div>
         </div>
-        <div class="stat">
-            <div class="stat-value" style="color: #ea580c;">{{ high }}</div>
-            <div class="stat-label">High</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value">{{ task_count }}</div>
-            <div class="stat-label">Total</div>
+        <div style="display:flex;gap:0.5rem;">
+            <button class="btn btn-ghost" onclick="refreshBacklog()">Refresh</button>
+            <button class="btn btn-ghost" onclick="openClosedLookup()">View Closed Ticket</button>
+            <button class="btn btn-ghost" id="bulkEditToggle" onclick="toggleBulkMode()">Bulk Edit</button>
         </div>
     </div>
+</div>
+
+<!-- Bulk Edit Bar -->
+<div id="bulkBar" style="display:none;background:#111;color:#fff;padding:0.75rem 1rem;border-radius:8px;
+    margin-bottom:0.75rem;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <span id="bulkCount" style="font-weight:600;font-size:0.85rem;">0 selected</span>
+    <div style="display:flex;gap:0.75rem;align-items:center;flex:1;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Status:</label>
+            <select id="bulkStatus" class="panel-input" style="width:auto;min-width:120px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+                <option value="">— No change —</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Assignee:</label>
+            <select id="bulkAssignee" class="panel-input" style="width:auto;min-width:150px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+                <option value="">— No change —</option>
+            </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="applyBulkEdit()">Apply</button>
+        <span id="bulkStatus_msg" style="font-size:0.75rem;"></span>
+    </div>
+    <button onclick="toggleBulkMode()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.1rem;">✕</button>
 </div>
 
 <div class="card" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
@@ -62,7 +97,7 @@
         </thead>
         <tbody>
             {% for task in tasks %}
-            <tr onclick="openPanel({{ task.id }})" data-task-id="{{ task.id }}">
+            <tr onclick="handleRowClick(event, {{ task.id }})" data-task-id="{{ task.id }}">
                 <td>
                     <span class="score
                         {% if task._score < 10 %}score-critical
@@ -157,6 +192,18 @@
 
 {% block scripts %}
 <script>
+// ---- Hide loading indicator once page is ready ----
+document.getElementById('pageLoading').style.display = 'none';
+
+function refreshBacklog() {
+    document.getElementById('pageLoading').style.display = 'flex';
+    window.location.href = '/backlog';
+}
+
+window.addEventListener('pageshow', function(e) {
+    if (e.persisted) document.getElementById('pageLoading').style.display = 'none';
+});
+
 // ---- Task data ----
 const tasks = JSON.parse(document.getElementById('taskData').textContent);
 const taskMap = {};
@@ -348,41 +395,32 @@ function renderPanel(task, messages) {
     }
 
     // Conversation / Messages
-    if (messages && messages.length > 0) {
+    {
+        const msgCount = messages ? messages.length : 0;
         html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (' + messages.length + ')</div>';
+            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">' + msgCount + '</span>)</div>' +
+            '<div class="conversation-list">';
 
-        for (const msg of messages) {
-            const msgDate = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
-            const author = msg._author || 'System';
-            const typeIcon = msg.message_type === 'email' ? '✉' :
-                             msg.message_type === 'comment' ? '💬' : '🔔';
-
-            html += '<div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
-                '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">' +
-                typeIcon + ' ' + escHtml(author) + '</span>' +
-                '<span style="font-size:0.7rem;color:#94a3b8;">' + escHtml(msgDate) + '</span>' +
-                '</div>' +
-                '<div style="font-size:0.8rem;color:#475569;line-height:1.5;overflow-wrap:break-word;">' +
-                msg.body + '</div>';
-
-            if (msg._attachments && msg._attachments.length > 0) {
-                html += '<div style="margin-top:0.4rem;">';
-                for (const att of msg._attachments) {
-                    const size = att.file_size ? ' (' + (att.file_size / 1024).toFixed(0) + ' KB)' : '';
-                    html += '<span style="display:inline-block;font-size:0.7rem;color:#2563eb;' +
-                        'background:#eff6ff;padding:0.15rem 0.4rem;border-radius:3px;margin-right:0.3rem;">' +
-                        '📎 ' + escHtml(att.name) + size + '</span>';
-                }
-                html += '</div>';
+        if (messages && messages.length > 0) {
+            for (const msg of messages) {
+                html += renderMessage(msg);
             }
-
-            html += '</div>';
         }
 
         html += '</div>';
+
+        html += '</div>';
     }
+
+    // Add comment
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<div class="panel-field-label" style="margin-bottom:0.5rem;">Add Comment</div>' +
+        '<textarea id="commentBox" rows="3" class="panel-input" ' +
+        'style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
+        '<button class="btn btn-primary btn-sm" onclick="postComment(\'task\',' + task.id + ')">Post Comment</button>' +
+        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span>' +
+        '</div></div>';
 
     // Link to Odoo
     html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
@@ -428,6 +466,35 @@ function escAttr(s) {
     return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function renderMessage(msg) {
+    const msgDate = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
+    const author = msg._author || 'System';
+    const typeIcon = msg.message_type === 'email' ? '✉' :
+                     msg.message_type === 'comment' ? '💬' : '🔔';
+
+    let html = '<div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
+        '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">' +
+        typeIcon + ' ' + escHtml(author) + '</span>' +
+        '<span style="font-size:0.7rem;color:#94a3b8;">' + escHtml(msgDate) + '</span></div>' +
+        '<div style="font-size:0.8rem;color:#475569;line-height:1.5;overflow-wrap:break-word;">' +
+        msg.body + '</div>';
+
+    if (msg._attachments && msg._attachments.length > 0) {
+        html += '<div style="margin-top:0.4rem;">';
+        for (const att of msg._attachments) {
+            const size = att.file_size ? ' (' + (att.file_size / 1024).toFixed(0) + ' KB)' : '';
+            html += '<span style="display:inline-block;font-size:0.7rem;color:#2563eb;' +
+                'background:#eff6ff;padding:0.15rem 0.4rem;border-radius:3px;margin-right:0.3rem;">' +
+                '📎 ' + escHtml(att.name) + size + '</span>';
+        }
+        html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
 // ---- Save panel changes to Odoo ----
 
 function savePanel(e) {
@@ -463,7 +530,8 @@ function savePanel(e) {
         btn.disabled = false;
         btn.textContent = 'Save Changes';
         status.textContent = '✓ Saved';
-        setTimeout(() => { status.textContent = ''; }, 3000);
+        status.style.color = '#16a34a';
+        setTimeout(() => { status.textContent = ''; }, 2000);
     })
     .catch(err => {
         btn.disabled = false;
@@ -487,6 +555,392 @@ function escHtml(s) {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+// ---- Post Comment ----
+function postComment(model, recordId) {
+    const box = document.getElementById('commentBox');
+    const status = document.getElementById('commentStatus');
+    const body = box.value.trim();
+    if (!body) return;
+
+    // Optimistically add the comment to the UI immediately
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 16).replace('T', ' ');
+    const loginUser = document.querySelector('.user')?.textContent || 'You';
+
+    const conversationContainer = document.querySelector('.conversation-list');
+    if (conversationContainer) {
+        const newMsg = document.createElement('div');
+        newMsg.style.cssText = 'margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;';
+        newMsg.innerHTML =
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
+            '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">💬 ' + escHtml(loginUser) + '</span>' +
+            '<span style="font-size:0.7rem;color:#94a3b8;">' + dateStr + '</span></div>' +
+            '<div style="font-size:0.8rem;color:#475569;line-height:1.5;">' +
+            escHtml(body).replace(/\n/g, '<br/>') + '</div>';
+        conversationContainer.insertBefore(newMsg, conversationContainer.firstChild);
+
+        // Update count
+        const countEl = document.getElementById('conversationCount');
+        if (countEl) {
+            countEl.textContent = parseInt(countEl.textContent) + 1;
+        }
+    }
+
+    // Clear box immediately
+    box.value = '';
+    status.textContent = 'Posting...';
+    status.style.color = '#94a3b8';
+
+    // Fire API call in background
+    fetch('/api/' + model + '/' + recordId + '/comment', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({body: body}),
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
+        return r.json();
+    })
+    .then(() => {
+        status.textContent = '✓ Saved';
+        status.style.color = '#16a34a';
+        setTimeout(() => { status.textContent = ''; }, 2000);
+    })
+    .catch(err => {
+        status.textContent = '✗ ' + err.message + ' (comment may not have saved)';
+        status.style.color = '#dc2626';
+    });
+}
+
+// ---- Closed Ticket Lookup ----
+function openClosedLookup() {
+    document.getElementById('panelTitle').textContent = 'View Closed Ticket';
+    document.getElementById('panelScore').innerHTML = '';
+    document.getElementById('panelBody').innerHTML =
+        '<div style="padding:1rem 0;">' +
+        '<div class="panel-field-label">Enter Ticket Number</div>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;">' +
+        '<input type="text" id="closedTicketRef" placeholder="e.g. 62241" class="panel-input" ' +
+        'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+        '<button class="btn btn-primary" onclick="lookupClosedTicket()">Look Up</button>' +
+        '</div>' +
+        '<p style="margin-top:0.5rem;font-size:0.75rem;color:#94a3b8;">Enter the ticket ID number shown in Odoo</p>' +
+        '</div>';
+    document.getElementById('panelOverlay').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+    setTimeout(() => document.getElementById('closedTicketRef').focus(), 300);
+}
+
+function lookupClosedTicket() {
+    const ref = document.getElementById('closedTicketRef').value.trim();
+    if (!ref) return;
+
+    document.getElementById('panelBody').innerHTML =
+        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading ticket #' + escHtml(ref) + '...</div>';
+
+    fetch('/api/ticket/lookup/' + encodeURIComponent(ref))
+        .then(r => {
+            if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Not found'); });
+            return r.json();
+        })
+        .then(data => renderClosedTicket(data))
+        .catch(err => {
+            document.getElementById('panelBody').innerHTML =
+                '<div class="error">' + escHtml(err.message) + '</div>' +
+                '<div style="padding:1rem 0;">' +
+                '<div style="display:flex;gap:0.5rem;">' +
+                '<input type="text" id="closedTicketRef" value="' + escAttr(ref) + '" class="panel-input" ' +
+                'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+                '<button class="btn btn-primary" onclick="lookupClosedTicket()">Try Again</button>' +
+                '</div></div>';
+        });
+}
+
+function renderClosedTicket(data) {
+    const ticket = data.ticket;
+    const task = data.task;
+    const messages = data.messages || [];
+
+    document.getElementById('panelTitle').textContent = '#' + (ticket.ticket_ref || ticket.id);
+
+    // Score (if linked task exists)
+    if (task && task._score !== undefined) {
+        let scoreClass = 'score-low';
+        if (task._score < 10) scoreClass = 'score-critical';
+        else if (task._score < 20) scoreClass = 'score-high';
+        else if (task._score < 30) scoreClass = 'score-medium';
+        document.getElementById('panelScore').innerHTML =
+            '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
+            '<span style="color:#64748b;font-size:0.85rem;">Priority Score</span>';
+    } else {
+        document.getElementById('panelScore').innerHTML =
+            '<span class="badge badge-gray">Closed Ticket</span>';
+    }
+
+    let html = '';
+
+    // Title
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Title</div>' +
+        '<div class="panel-field-value">' + escHtml(ticket.name || '—') + '</div></div>';
+
+    // Fields grid
+    const stage = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[1] : ticket.stage_id) : '—';
+    const customer = ticket.partner_id ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[1] : ticket.partner_id) : '—';
+    const assignee = ticket.user_id ? (Array.isArray(ticket.user_id) ? ticket.user_id[1] : ticket.user_id) : '—';
+
+    // Status dropdown (editable to allow reopening)
+    const stageId = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[0] : ticket.stage_id) : '';
+    const opts = fieldOptions || {};
+
+    html += '<div class="panel-grid">';
+
+    html += '<div class="panel-field">' +
+        '<div class="panel-field-label">Status</div>' +
+        '<select id="ticketStageSelect" class="panel-input" data-original="' + stageId + '">' +
+        '<option value="">—</option>';
+    for (const s of (opts.stages || [])) {
+        const selected = String(s.id) === String(stageId) ? ' selected' : '';
+        html += '<option value="' + s.id + '"' + selected + '>' + escHtml(s.name) + '</option>';
+    }
+    html += '</select></div>';
+
+    const readOnlyFields = [
+        {label: 'Customer', value: customer},
+        {label: 'Assignee', value: assignee},
+        {label: 'Priority', value: ticket.priority || '—'},
+        {label: 'Created', value: ticket.create_date ? ticket.create_date.slice(0, 10) : '—'},
+        {label: 'Ticket Ref', value: ticket.ticket_ref || '—'},
+    ];
+
+    for (const f of readOnlyFields) {
+        html += '<div class="panel-field">' +
+            '<div class="panel-field-label">' + f.label + '</div>' +
+            '<div class="panel-field-value">' + escHtml(String(f.value)) + '</div></div>';
+    }
+
+    html += '</div>';
+
+    // Save status button (only visible when changed)
+    html += '<div id="ticketStatusSave" style="margin-top:0.75rem;display:none;align-items:center;gap:0.75rem;">' +
+        '<button class="btn btn-primary btn-sm" onclick="updateTicketStatus(' + ticket.id + ')">Update Status</button>' +
+        '<span id="ticketStatusMsg" style="font-size:0.75rem;color:#94a3b8;"></span>' +
+        '</div>';
+
+    // Description
+    if (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false) {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label">Description</div>' +
+            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;max-height:200px;overflow-y:auto;">' +
+            ticket.description + '</div></div>';
+    }
+
+    // Messages
+    {
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">' + messages.length + '</span>)</div>' +
+            '<div class="conversation-list">';
+
+        for (const msg of messages) {
+            html += renderMessage(msg);
+        }
+
+        html += '</div></div>';
+    }
+
+    // Add comment
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<div class="panel-field-label" style="margin-bottom:0.5rem;">Add Comment</div>' +
+        '<textarea id="commentBox" rows="3" class="panel-input" ' +
+        'style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
+        '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\',' + ticket.id + ')">Post Comment</button>' +
+        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span>' +
+        '</div></div>';
+
+    // Look up another
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
+        '<div style="display:flex;gap:0.5rem;">' +
+        '<input type="text" id="closedTicketRef" placeholder="Look up another..." class="panel-input" ' +
+        'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+        '<button class="btn btn-ghost" onclick="lookupClosedTicket()">Look Up</button>' +
+        '</div></div>';
+
+    document.getElementById('panelBody').innerHTML = html;
+
+    // Show save button when status dropdown changes
+    const stageSelect = document.getElementById('ticketStageSelect');
+    const saveDiv = document.getElementById('ticketStatusSave');
+    if (stageSelect && saveDiv) {
+        stageSelect.addEventListener('change', function() {
+            if (this.value !== this.dataset.original) {
+                saveDiv.style.display = 'flex';
+            } else {
+                saveDiv.style.display = 'none';
+            }
+        });
+    }
+}
+
+function updateTicketStatus(ticketId) {
+    const select = document.getElementById('ticketStageSelect');
+    const msg = document.getElementById('ticketStatusMsg');
+    const newStageId = select.value;
+
+    if (!newStageId) return;
+
+    msg.textContent = 'Updating...';
+    msg.style.color = '#94a3b8';
+
+    // Optimistically update the dropdown's "original" to the new value
+    select.dataset.original = newStageId;
+    document.getElementById('ticketStatusSave').style.display = 'none';
+
+    fetch('/api/ticket/' + ticketId + '/update-status', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({stage_id: parseInt(newStageId)}),
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
+        return r.json();
+    })
+    .then(() => {
+        msg.textContent = '✓ Status updated';
+        msg.style.color = '#16a34a';
+        document.getElementById('ticketStatusSave').style.display = 'flex';
+        setTimeout(() => {
+            document.getElementById('ticketStatusSave').style.display = 'none';
+            msg.textContent = '';
+        }, 2000);
+    })
+    .catch(err => {
+        msg.textContent = '✗ ' + err.message;
+        msg.style.color = '#dc2626';
+        document.getElementById('ticketStatusSave').style.display = 'flex';
+    });
+}
+
+// ---- Bulk Edit ----
+let bulkMode = false;
+const selectedIds = new Set();
+
+function toggleBulkMode() {
+    bulkMode = !bulkMode;
+    const table = document.getElementById('backlog-table');
+    const bar = document.getElementById('bulkBar');
+    const btn = document.getElementById('bulkEditToggle');
+
+    if (bulkMode) {
+        table.classList.add('bulk-mode');
+        bar.style.display = 'flex';
+        btn.textContent = 'Cancel Bulk';
+        btn.style.background = '#dc2626';
+        btn.style.color = '#fff';
+        btn.style.borderColor = '#dc2626';
+        populateBulkDropdowns();
+    } else {
+        table.classList.remove('bulk-mode');
+        bar.style.display = 'none';
+        btn.textContent = 'Bulk Edit';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.style.borderColor = '';
+        selectedIds.clear();
+        document.querySelectorAll('#backlog-table tbody tr').forEach(tr => tr.classList.remove('selected'));
+        updateBulkCount();
+    }
+}
+
+function populateBulkDropdowns() {
+    const opts = fieldOptions || {};
+    const statusSel = document.getElementById('bulkStatus');
+    const assigneeSel = document.getElementById('bulkAssignee');
+
+    statusSel.innerHTML = '<option value="">— No change —</option>';
+    for (const s of (opts.stages || [])) {
+        statusSel.innerHTML += '<option value="' + s.id + '">' + escHtml(s.name) + '</option>';
+    }
+
+    assigneeSel.innerHTML = '<option value="">— No change —</option>';
+    for (const u of (opts.users || [])) {
+        assigneeSel.innerHTML += '<option value="' + u.id + '">' + escHtml(u.name) + '</option>';
+    }
+}
+
+function handleRowClick(event, taskId) {
+    if (bulkMode) {
+        const row = event.currentTarget;
+        if (selectedIds.has(taskId)) {
+            selectedIds.delete(taskId);
+            row.classList.remove('selected');
+        } else {
+            selectedIds.add(taskId);
+            row.classList.add('selected');
+        }
+        updateBulkCount();
+    } else {
+        openPanel(taskId);
+    }
+}
+
+function updateBulkCount() {
+    document.getElementById('bulkCount').textContent = selectedIds.size + ' selected';
+}
+
+function applyBulkEdit() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    const stageId = document.getElementById('bulkStatus').value;
+    const userId = document.getElementById('bulkAssignee').value;
+    const msg = document.getElementById('bulkStatus_msg');
+
+    if (!stageId && !userId) {
+        msg.textContent = 'Select a status or assignee to apply';
+        msg.style.color = '#fbbf24';
+        return;
+    }
+
+    const payload = {task_ids: ids};
+    if (stageId) payload.stage_id = stageId;
+    if (userId) payload.user_ids = [userId];
+
+    msg.textContent = 'Updating ' + ids.length + ' tasks...';
+    msg.style.color = '#94a3b8';
+
+    // Optimistically update the visible table
+    const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
+    if (stageLabel) {
+        ids.forEach(id => {
+            const row = document.querySelector('tr[data-task-id="' + id + '"]');
+            if (row) {
+                const cell = row.cells[4]; // 0=score, 1=id, 2=title, 3=customer, 4=status
+                if (cell) cell.innerHTML = '<span class="badge badge-gray">' + escHtml(stageLabel) + '</span>';
+            }
+        });
+    }
+
+    fetch('/api/tasks/bulk-update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
+        return r.json();
+    })
+    .then(result => {
+        msg.textContent = '✓ Updated ' + result.updated + ' tasks';
+        msg.style.color = '#4ade80';
+        setTimeout(() => { msg.textContent = ''; }, 3000);
+    })
+    .catch(err => {
+        msg.textContent = '✗ ' + err.message;
+        msg.style.color = '#f87171';
+    });
+}
 
 // ---- Sorting ----
 const headers = table.querySelectorAll('th.sortable');
