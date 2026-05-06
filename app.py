@@ -241,6 +241,25 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
     return tasks
 
 
+def compute_score_thresholds(tasks: list) -> dict:
+    """Compute Critical/High/Medium/Low thresholds from percentiles of actual scores."""
+    scores = sorted(t.get("_score", 0) for t in tasks)
+    n = len(scores)
+    if n == 0:
+        return {"critical": 0, "high": 0, "medium": 0}
+
+    def percentile(pct):
+        idx = int(n * pct / 100)
+        return scores[min(idx, n - 1)]
+
+    return {
+        "critical": percentile(25),  # bottom 25%
+        "high": percentile(50),      # 25-50%
+        "medium": percentile(75),    # 50-75%
+        # 75%+ = low
+    }
+
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
@@ -316,12 +335,15 @@ async def backlog(request: Request):
     # Build JSON-safe version for the detail panel
     task_json = json.dumps(tasks, default=str)
 
+    thresholds = compute_score_thresholds(tasks)
+
     return templates.TemplateResponse(request, "backlog.html", {
         "tasks": tasks,
         "task_json": task_json,
         "login": creds["login"],
         "field_labels": FIELD_LABELS,
         "task_count": len(tasks),
+        "thresholds": thresholds,
     })
 
 
@@ -405,6 +427,38 @@ async def gantt_page(request: Request):
         "task_count": len(tasks),
         "user_names": user_names,
     })
+
+
+@app.post("/api/recalculate-scores")
+async def api_recalculate_scores(request: Request):
+    """Recalculate priority scores for all open tasks using current weights."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Clear the selection labels cache so fresh data is used
+    global _selection_labels_cache
+    _selection_labels_cache = None
+
+    tasks = odoo_search_read(
+        creds["uid"], creds["api_key"], "project.task",
+        [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
+        TASK_FIELDS,
+    )
+
+    weight_map = load_weight_map(creds["uid"], creds["api_key"])
+    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+
+    scored_tasks = []
+    scores = {}
+    for task in tasks:
+        s = score_task(task, weight_map, sel_labels)
+        scores[task["id"]] = s
+        scored_tasks.append({"_score": s})
+
+    thresholds = compute_score_thresholds(scored_tasks)
+
+    return {"ok": True, "scores": scores, "count": len(scores), "thresholds": thresholds}
 
 
 @app.post("/api/task/{task_id}/dates")
@@ -636,6 +690,8 @@ async def update_task(request: Request, task_id: int):
         else:
             logging.warning(f"Task {task_id} has no linked helpdesk ticket — "
                             f"cannot update ticket fields: {list(ticket_values.keys())}")
+            raise HTTPException(status_code=400,
+                detail=f"Task has no linked helpdesk ticket. Cannot save: Customer, Issue Type, Customer Funded, Escalated, Paid Prioritization. These fields live on the helpdesk ticket.")
 
     return {"ok": True, "updated": updated}
 

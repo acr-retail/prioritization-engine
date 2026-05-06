@@ -394,6 +394,40 @@
 
         .panel-tooltip:hover { background: #cbd5e1; color: #334155; }
 
+        .panel-tooltip:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a1a;
+            color: #fff;
+            padding: 0.4rem 0.6rem;
+            border-radius: 5px;
+            font-size: 0.7rem;
+            font-weight: 400;
+            white-space: normal;
+            width: 200px;
+            text-align: left;
+            line-height: 1.4;
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            margin-bottom: 4px;
+        }
+
+        .panel-tooltip:hover::before {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: #1a1a1a;
+            z-index: 100;
+            pointer-events: none;
+        }
+
         /* Loading spinner */
         .spinner {
             width: 32px;

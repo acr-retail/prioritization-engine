@@ -7,9 +7,125 @@
 <div class="page-header">
     <div>
         <h1>Scoring Configuration</h1>
-        <p class="subtitle">Adjust priority weights. Lower total score = higher priority. Changes take effect on next backlog refresh.</p>
+        <p class="subtitle">Configure how tasks are prioritized in the backlog.</p>
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+        <button class="btn btn-primary" onclick="recalculateScores()">Recalculate Scores</button>
+        <button class="btn btn-ghost" onclick="toggleWeightHelp()">Help</button>
     </div>
 </div>
+
+<div id="weightHelp" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1.5rem;font-size:0.8rem;color:#374151;line-height:1.7;position:relative;">
+    <button onclick="toggleWeightHelp()" style="position:absolute;top:0.75rem;right:1rem;background:none;border:none;font-size:1.1rem;cursor:pointer;color:#94a3b8;">✕</button>
+    <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.75rem;">How Priority Scoring Works</div>
+
+    <div style="margin-bottom:1rem;">
+        Every task gets a <strong>priority score</strong> calculated by adding up the weights from each attribute below.
+        The <strong>lower the total score, the higher the priority</strong>. Tasks in the backlog are sorted by this score — lowest first.
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem 2rem;">
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Weight Values</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Negative weights</strong> (e.g. -15, -10, -5) push items to the top — use these for urgent items like system-stopping bugs or paid prioritization</li>
+                <li><strong>Low positive weights</strong> (1-2) indicate high priority — the item contributes little to the total score, keeping it low</li>
+                <li><strong>High positive weights</strong> (4-5) indicate low priority — the item adds more to the score, pushing it down the list</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Example</div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:0.75rem;font-size:0.75rem;">
+                <div style="margin-bottom:0.5rem;">A <strong>system-stopping bug</strong> for <strong>Schnucks</strong> that is <strong>escalated</strong> and <strong>paid</strong>:</div>
+                <table style="width:100%;font-size:0.7rem;">
+                    <tr><td>Customer (Schnucks)</td><td style="text-align:right;font-weight:600;">1</td></tr>
+                    <tr><td>Escalated (Yes)</td><td style="text-align:right;font-weight:600;">1</td></tr>
+                    <tr><td>Issue Type (System stopping)</td><td style="text-align:right;font-weight:600;color:#dc2626;">-15</td></tr>
+                    <tr><td>Customer Funded (Yes)</td><td style="text-align:right;font-weight:600;color:#dc2626;">-5</td></tr>
+                    <tr><td>Effort (&lt;10 Hrs)</td><td style="text-align:right;font-weight:600;">1</td></tr>
+                    <tr><td>Roadmap (Yes)</td><td style="text-align:right;font-weight:600;">1</td></tr>
+                    <tr><td>Paid (Yes)</td><td style="text-align:right;font-weight:600;color:#dc2626;">-10</td></tr>
+                    <tr><td>Age (&gt;90 days)</td><td style="text-align:right;font-weight:600;">1</td></tr>
+                    <tr style="border-top:1px solid #e2e8f0;font-weight:700;"><td>Total Score</td><td style="text-align:right;color:#dc2626;">-25</td></tr>
+                </table>
+                <div style="margin-top:0.5rem;color:#64748b;">This task would appear at the very top of the backlog.</div>
+            </div>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">How Changes Apply</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li>Change a weight value and click <strong>Save</strong> — the new weight is stored in Odoo immediately</li>
+                <li>Scores recalculate when you load the <strong>Backlog</strong> or <strong>Gantt</strong> page</li>
+                <li>To see updated scores, navigate to the Backlog and click <strong>Refresh</strong></li>
+                <li>Weights are shared across all users — any change affects everyone's view</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Score Ranges in the Backlog</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><span style="display:inline-block;width:12px;height:12px;background:#fef2f2;border:1px solid #dc2626;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>Below 10</strong> — Critical (red)</li>
+                <li><span style="display:inline-block;width:12px;height:12px;background:#fff7ed;border:1px solid #ea580c;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>10–19</strong> — High (orange)</li>
+                <li><span style="display:inline-block;width:12px;height:12px;background:#fefce8;border:1px solid #ca8a04;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>20–29</strong> — Medium (yellow)</li>
+                <li><span style="display:inline-block;width:12px;height:12px;background:#f0fdf4;border:1px solid #16a34a;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>30+</strong> — Low (green)</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleWeightHelp() {
+    const el = document.getElementById('weightHelp');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function recalculateScores() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Recalculating...';
+
+    fetch('/api/recalculate-scores', { method: 'POST' })
+        .then(r => {
+            if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
+            return r.json();
+        })
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Recalculate Scores';
+
+            // Show results
+            const scores = data.scores;
+            const th = data.thresholds || {critical:10, high:20, medium:30};
+            const values = Object.values(scores);
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const avg = (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1);
+            const critical = values.filter(s => s < th.critical).length;
+            const high = values.filter(s => s >= th.critical && s < th.high).length;
+            const medium = values.filter(s => s >= th.high && s < th.medium).length;
+            const low = values.filter(s => s >= th.medium).length;
+
+            const msg = document.getElementById('recalcMsg');
+            if (msg) {
+                msg.innerHTML = '<span style="color:#16a34a;font-weight:600;">✓ Recalculated ' + data.count + ' tasks</span>' +
+                    '<span style="margin-left:1rem;font-size:0.75rem;color:#64748b;">' +
+                    'Range: ' + min + ' to ' + max + ' (avg ' + avg + ') · ' +
+                    '<span style="color:#dc2626;">' + critical + ' critical</span> · ' +
+                    '<span style="color:#ea580c;">' + high + ' high</span> · ' +
+                    '<span style="color:#ca8a04;">' + medium + ' medium</span> · ' +
+                    '<span style="color:#16a34a;">' + low + ' low</span></span>';
+                setTimeout(() => { msg.innerHTML = ''; }, 10000);
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = 'Recalculate Scores';
+            const msg = document.getElementById('recalcMsg');
+            if (msg) msg.innerHTML = '<span style="color:#dc2626;">✗ ' + err.message + '</span>';
+        });
+}
+</script>
+
+<div id="recalcMsg" style="margin-bottom:1rem;font-size:0.85rem;"></div>
 
 {% for item in attributes %}
 <div class="card" style="margin-bottom: 1.5rem;">

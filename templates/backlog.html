@@ -14,16 +14,29 @@
         <p class="subtitle">{{ task_count }} open tasks — lowest score = highest priority</p>
     </div>
     <div style="display:flex;align-items:center;gap:1.5rem;">
-        <div class="stats">
-            {% set critical = tasks | selectattr("_score", "lt", 10) | list | length %}
-            {% set high = tasks | selectattr("_score", "lt", 25) | rejectattr("_score", "lt", 10) | list | length %}
+        <div class="stats" id="backlogStats">
+            {% set t_crit = thresholds.critical %}
+            {% set t_high = thresholds.high %}
+            {% set t_med = thresholds.medium %}
+            {% set critical = tasks | selectattr("_score", "lt", t_crit) | list | length %}
+            {% set high = tasks | selectattr("_score", "ge", t_crit) | selectattr("_score", "lt", t_high) | list | length %}
+            {% set medium = tasks | selectattr("_score", "ge", t_high) | selectattr("_score", "lt", t_med) | list | length %}
+            {% set low = tasks | selectattr("_score", "ge", t_med) | list | length %}
             <div class="stat">
                 <div class="stat-value" style="color: #dc2626;">{{ critical }}</div>
-                <div class="stat-label">Critical</div>
+                <div class="stat-label">Critical (&lt;{{ t_crit }})</div>
             </div>
             <div class="stat">
                 <div class="stat-value" style="color: #ea580c;">{{ high }}</div>
-                <div class="stat-label">High</div>
+                <div class="stat-label">High ({{ t_crit }}-{{ t_high - 1 }})</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" style="color: #ca8a04;">{{ medium }}</div>
+                <div class="stat-label">Medium ({{ t_high }}-{{ t_med - 1 }})</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" style="color: #16a34a;">{{ low }}</div>
+                <div class="stat-label">Low ({{ t_med }}+)</div>
             </div>
             <div class="stat">
                 <div class="stat-value">{{ task_count }}</div>
@@ -100,9 +113,9 @@
             <tr onclick="handleRowClick(event, {{ task.id }})" data-task-id="{{ task.id }}">
                 <td>
                     <span class="score
-                        {% if task._score < 10 %}score-critical
-                        {% elif task._score < 20 %}score-high
-                        {% elif task._score < 30 %}score-medium
+                        {% if task._score < thresholds.critical %}score-critical
+                        {% elif task._score < thresholds.high %}score-high
+                        {% elif task._score < thresholds.medium %}score-medium
                         {% else %}score-low{% endif %}">
                         {{ task._score }}
                     </span>
@@ -131,6 +144,7 @@
 </div>
 
 <script id="taskData" type="application/json">{{ task_json | safe }}</script>
+<script id="thresholdData" type="application/json">{{ thresholds | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}

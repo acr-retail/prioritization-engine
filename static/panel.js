@@ -3,6 +3,20 @@ const taskMap = {};
 let fieldOptions = null;
 let currentTaskId = null;
 
+// Score thresholds (percentile-based, loaded from server)
+let scoreThresholds = {critical: 10, high: 20, medium: 30};
+try {
+    const td = document.getElementById('thresholdData');
+    if (td) scoreThresholds = JSON.parse(td.textContent);
+} catch(e) {}
+
+function getScoreClass(score) {
+    if (score < scoreThresholds.critical) return 'score-critical';
+    if (score < scoreThresholds.high) return 'score-high';
+    if (score < scoreThresholds.medium) return 'score-medium';
+    return 'score-low';
+}
+
 // ---- Cache helpers ----
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -58,13 +72,8 @@ function renderPanel(task, messages) {
     currentTaskId = task.id;
     const opts = fieldOptions || {};
 
-    let scoreClass = 'score-low';
-    if (task._score < 10) scoreClass = 'score-critical';
-    else if (task._score < 20) scoreClass = 'score-high';
-    else if (task._score < 30) scoreClass = 'score-medium';
-
     document.getElementById('panelScore').innerHTML =
-        '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
+        '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>' +
         '<span style="color:#64748b;font-size:0.85rem;">Priority Score — lower is more urgent</span>';
 
     let html = '<form id="panelForm" onsubmit="return savePanel(event)">';
@@ -245,11 +254,7 @@ function updateBacklogRow(task) {
     // Score (col 0)
     const scoreCell = row.cells[0];
     if (scoreCell) {
-        let cls = 'score-low';
-        if (task._score < 10) cls = 'score-critical';
-        else if (task._score < 20) cls = 'score-high';
-        else if (task._score < 30) cls = 'score-medium';
-        scoreCell.innerHTML = '<span class="score ' + cls + '">' + task._score + '</span>';
+        scoreCell.innerHTML = '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>';
     }
 
     // Status (col 4)
