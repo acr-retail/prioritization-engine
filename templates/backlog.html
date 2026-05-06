@@ -109,717 +109,54 @@
                 </td>
                 <td style="color: #64748b; font-size: 0.8rem;">{{ task.id }}</td>
                 <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
+                <td>{% if task._customer %}<span class="badge badge-blue">{{ task._customer }}</span>{% endif %}</td>
                 <td>
-                    {% if task._customer %}
-                    <span class="badge badge-blue">{{ task._customer }}</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if task._stage == 'New' %}
-                    <span class="badge badge-gray">{{ task._stage }}</span>
-                    {% elif 'Progress' in task._stage %}
-                    <span class="badge badge-yellow">{{ task._stage }}</span>
-                    {% elif 'Queued' in task._stage %}
-                    <span class="badge badge-blue">{{ task._stage }}</span>
-                    {% else %}
-                    <span class="badge badge-gray">{{ task._stage }}</span>
-                    {% endif %}
+                    {% if task._stage == 'New' %}<span class="badge badge-gray">{{ task._stage }}</span>
+                    {% elif 'Progress' in task._stage %}<span class="badge badge-yellow">{{ task._stage }}</span>
+                    {% elif 'Queued' in task._stage %}<span class="badge badge-blue">{{ task._stage }}</span>
+                    {% else %}<span class="badge badge-gray">{{ task._stage }}</span>{% endif %}
                 </td>
                 <td style="font-size: 0.8rem;">{{ task.x_studio_issue_type or '' }}</td>
-                <td>
-                    {% if task.get('x_studio_related_field_5vi_1jnfmj9cf') %}
-                    <span class="badge badge-yellow">Yes</span>
-                    {% else %}
-                    <span style="color: #cbd5e1;">No</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% set funded = task.get('x_studio_related_field_gd_1jnftb4gl', '') %}
-                    {% if funded == 'Yes' %}
-                    <span class="badge badge-green">Yes</span>
-                    {% else %}
-                    <span style="color: #cbd5e1;">{{ funded or 'No' }}</span>
-                    {% endif %}
-                </td>
+                <td>{% if task.get('x_studio_related_field_5vi_1jnfmj9cf') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
+                <td>{% set funded = task.get('x_studio_related_field_gd_1jnftb4gl', '') %}{% if funded == 'Yes' %}<span class="badge badge-green">Yes</span>{% else %}<span style="color:#cbd5e1;">{{ funded or 'No' }}</span>{% endif %}</td>
                 <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
-                <td>
-                    {% if task.get('x_studio_related_field_27d_1jnftbs3p') %}
-                    <span class="badge badge-yellow">Yes</span>
-                    {% else %}
-                    <span style="color: #cbd5e1;">No</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if task.get('x_studio_road_map_flag') %}
-                    <span class="badge badge-blue">Yes</span>
-                    {% else %}
-                    <span style="color: #cbd5e1;">No</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="badge
-                        {% if task._age == '>90' %}badge-yellow
-                        {% elif task._age == '60-90' %}badge-blue
-                        {% else %}badge-gray{% endif %}">
-                        {{ task._age }}
-                    </span>
-                </td>
-                <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">
-                    {{ task.create_date[:10] if task.create_date else '' }}
-                </td>
+                <td>{% if task.get('x_studio_related_field_27d_1jnftbs3p') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
+                <td>{% if task.get('x_studio_road_map_flag') %}<span class="badge badge-blue">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
+                <td><span class="badge {% if task._age == '>90' %}badge-yellow{% elif task._age == '60-90' %}badge-blue{% else %}badge-gray{% endif %}">{{ task._age }}</span></td>
+                <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
-<!-- Detail Panel -->
-<div class="panel-overlay" id="panelOverlay" onclick="closePanel()"></div>
-<div class="panel" id="detailPanel">
-    <div class="panel-header">
-        <h2 id="panelTitle">Task Details</h2>
-        <button class="panel-close" onclick="closePanel()">✕</button>
-    </div>
-    <div class="panel-score" id="panelScore"></div>
-    <div class="panel-body" id="panelBody"></div>
-</div>
-
-<!-- Task data for the panel (embedded as JSON) -->
-<script id="taskData" type="application/json">
-{{ task_json | safe }}
-</script>
+<script id="taskData" type="application/json">{{ task_json | safe }}</script>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// ---- Hide loading indicator once page is ready ----
+// ---- Loading ----
 document.getElementById('pageLoading').style.display = 'none';
-
 function refreshBacklog() {
     document.getElementById('pageLoading').style.display = 'flex';
     window.location.href = '/backlog';
 }
+window.addEventListener('pageshow', e => { if (e.persisted) document.getElementById('pageLoading').style.display = 'none'; });
 
-window.addEventListener('pageshow', function(e) {
-    if (e.persisted) document.getElementById('pageLoading').style.display = 'none';
-});
-
-// ---- Task data ----
+// ---- Init task data (taskMap defined in panel.js) ----
 const tasks = JSON.parse(document.getElementById('taskData').textContent);
-const taskMap = {};
 tasks.forEach(t => taskMap[t.id] = t);
 
-// ---- Load dropdown options once ----
-let fieldOptions = null;
-fetch('/api/options')
-    .then(r => r.json())
-    .then(data => { fieldOptions = data; })
-    .catch(err => console.error('Failed to load options:', err));
-
-// ---- Build filter dropdowns from actual data ----
-const table = document.getElementById('backlog-table');
-const filterSelects = table.querySelectorAll('.filter-row select');
-
-filterSelects.forEach(select => {
-    const col = parseInt(select.dataset.col);
-    const values = new Set();
-
-    table.querySelectorAll('tbody tr').forEach(row => {
-        const text = row.cells[col].textContent.trim();
-        if (text) values.add(text);
-    });
-
-    // Sort values
-    const sorted = Array.from(values).sort((a, b) => {
-        // Try numeric sort first
-        const na = parseFloat(a), nb = parseFloat(b);
-        if (!isNaN(na) && !isNaN(nb)) return na - nb;
-        return a.localeCompare(b);
-    });
-
-    sorted.forEach(val => {
-        const opt = document.createElement('option');
-        opt.value = val;
-        opt.textContent = val;
-        select.appendChild(opt);
-    });
-
-    select.addEventListener('change', applyFilters);
-    select.addEventListener('click', e => e.stopPropagation());
-});
-
-// ---- Filtering ----
-function applyFilters() {
-    const filters = {};
-    filterSelects.forEach(select => {
-        const col = parseInt(select.dataset.col);
-        const val = select.value;
-        if (val) filters[col] = val;
-    });
-
-    const rows = table.querySelectorAll('tbody tr');
-    rows.forEach(row => {
-        let visible = true;
-        for (const [col, filter] of Object.entries(filters)) {
-            const cell = row.cells[parseInt(col)];
-            if (cell.textContent.trim() !== filter) {
-                visible = false;
-                break;
-            }
-        }
-        row.style.display = visible ? '' : 'none';
-    });
-}
-
-// ---- Detail Panel ----
-function openPanel(taskId) {
-    // Show panel immediately with loading state
-    const task = taskMap[taskId];
-    document.getElementById('panelTitle').textContent = '#' + taskId;
-    document.getElementById('panelScore').innerHTML = '';
-    document.getElementById('panelBody').innerHTML =
-        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
-    document.getElementById('panelOverlay').classList.add('open');
-    document.getElementById('detailPanel').classList.add('open');
-
-    // Fetch full details from Odoo
-    fetch('/api/task/' + taskId)
-        .then(r => { if (!r.ok) throw new Error('Failed to load'); return r.json(); })
-        .then(data => renderPanel(data.task, data.messages))
-        .catch(err => {
-            document.getElementById('panelBody').innerHTML =
-                '<div class="error">' + escHtml(err.message) + '</div>';
-        });
-}
-
-let currentTaskId = null;
-
-function renderPanel(task, messages) {
-    currentTaskId = task.id;
-    const opts = fieldOptions || {};
-
-    // Score
-    let scoreClass = 'score-low';
-    if (task._score < 10) scoreClass = 'score-critical';
-    else if (task._score < 20) scoreClass = 'score-high';
-    else if (task._score < 30) scoreClass = 'score-medium';
-
-    document.getElementById('panelScore').innerHTML =
-        '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
-        '<span style="color:#64748b;font-size:0.85rem;">Priority Score — lower is more urgent</span>';
-
-    let html = '<form id="panelForm" onsubmit="return savePanel(event)">';
-
-    // Title - text input
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Title</div>' +
-        '<input type="text" name="name" value="' + escAttr(task.name || '') + '" class="panel-input">' +
-        '</div>';
-
-    // Grid of editable fields
-    html += '<div class="panel-grid">';
-
-    // Customer - dropdown
-    const custId = task.x_studio_customer ? (Array.isArray(task.x_studio_customer) ? task.x_studio_customer[0] : task.x_studio_customer) : '';
-    html += panelSelect('Customer', 'x_studio_customer', custId, opts.customers || [], 'id', 'name');
-
-    // Status - dropdown
-    const stageId = task.stage_id ? (Array.isArray(task.stage_id) ? task.stage_id[0] : task.stage_id) : '';
-    html += panelSelect('Status', 'stage_id', stageId, opts.stages || [], 'id', 'name');
-
-    // Issue Type - dropdown
-    html += panelSelect('Issue Type', 'x_studio_issue_type', task.x_studio_issue_type || '', opts.issue_types || [], 'value', 'label');
-
-    // Escalated - Yes/No
-    html += panelBool('Escalated', 'x_studio_related_field_5vi_1jnfmj9cf', task.x_studio_related_field_5vi_1jnfmj9cf);
-
-    // Customer Funded - dropdown
-    html += panelSelect('Customer Funded', 'x_studio_related_field_gd_1jnftb4gl', task.x_studio_related_field_gd_1jnftb4gl || '', opts.customer_funded || [], 'value', 'label');
-
-    // Level of Effort - dropdown
-    html += panelSelect('Level of Effort', 'x_studio_level_of_effort', task.x_studio_level_of_effort || '', opts.effort_levels || [], 'value', 'label');
-
-    // Paid Prioritization - Yes/No
-    html += panelBool('Paid Prioritization', 'x_studio_related_field_27d_1jnftbs3p', task.x_studio_related_field_27d_1jnftbs3p);
-
-    // Roadmap - Yes/No
-    html += panelBool('Roadmap', 'x_studio_road_map_flag', task.x_studio_road_map_flag);
-
-    // Priority - dropdown
-    html += panelSelect('Priority', 'priority', task.priority || '0', opts.priorities || [], 'value', 'label');
-
-    // Age - read only
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Age</div>' +
-        '<div class="panel-field-value">' + escHtml(task._age || '—') + '</div></div>';
-
-    // Created - read only
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Created</div>' +
-        '<div class="panel-field-value">' + escHtml(task.create_date ? task.create_date.slice(0, 10) : '—') + '</div></div>';
-
-    // Assigned - date picker
-    html += panelDate('Assigned', 'date_assign', task.date_assign ? task.date_assign.slice(0, 10) : '');
-
-    // Deadline - date picker
-    html += panelDate('Deadline', 'date_deadline', task.date_deadline ? task.date_deadline.slice(0, 10) : '');
-
-    // Time Allocated - number
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Time Allocated (hrs)</div>' +
-        '<input type="number" name="allocated_hours" step="0.5" min="0" value="' +
-        (task.allocated_hours || '') + '" class="panel-input" placeholder="—">' +
-        '</div>';
-
-    // Time Spent - read only
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Time Spent</div>' +
-        '<div class="panel-field-value">' + (task.effective_hours ? task.effective_hours.toFixed(1) + 'h' : '—') + '</div></div>';
-
-    html += '</div>'; // end grid
-
-    // Save button
-    html += '<div style="margin-top:1.25rem;display:flex;gap:0.75rem;">' +
-        '<button type="submit" class="btn btn-primary" id="panelSaveBtn">Save Changes</button>' +
-        '<span id="panelSaveStatus" style="font-size:0.8rem;color:#16a34a;align-self:center;"></span>' +
-        '</div>';
-
-    html += '</form>';
-
-    // Description
-    if (task.description && task.description !== '<p><br></p>' && task.description !== false) {
-        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label">Description</div>' +
-            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;max-height:200px;overflow-y:auto;">' +
-            task.description + '</div></div>';
-    }
-
-    // Conversation / Messages
-    {
-        const msgCount = messages ? messages.length : 0;
-        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">' + msgCount + '</span>)</div>' +
-            '<div class="conversation-list">';
-
-        if (messages && messages.length > 0) {
-            for (const msg of messages) {
-                html += renderMessage(msg);
-            }
-        }
-
-        html += '</div>';
-
-        html += '</div>';
-    }
-
-    // Add comment
-    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-        '<div class="panel-field-label" style="margin-bottom:0.5rem;">Add Comment</div>' +
-        '<textarea id="commentBox" rows="3" class="panel-input" ' +
-        'style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
-        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
-        '<button class="btn btn-primary btn-sm" onclick="postComment(\'task\',' + task.id + ')">Post Comment</button>' +
-        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span>' +
-        '</div></div>';
-
-    // Link to Odoo
-    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-        '<a href="https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com/web#id=' +
-        task.id + '&model=project.task&view_type=form" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;">' +
-        'Open in Odoo →</a></div>';
-
-    document.getElementById('panelBody').innerHTML = html;
-}
-
-// ---- Panel form helpers ----
-
-function panelSelect(label, name, currentVal, options, valKey, labelKey) {
-    let html = '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
-        '<select name="' + name + '" class="panel-input">' +
-        '<option value="">—</option>';
-    for (const opt of options) {
-        const v = String(opt[valKey]);
-        const selected = String(currentVal) === v ? ' selected' : '';
-        html += '<option value="' + escAttr(v) + '"' + selected + '>' + escHtml(opt[labelKey]) + '</option>';
-    }
-    html += '</select></div>';
-    return html;
-}
-
-function panelBool(label, name, currentVal) {
-    const yes = currentVal === true ? ' selected' : '';
-    const no = currentVal !== true ? ' selected' : '';
-    return '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
-        '<select name="' + name + '" class="panel-input">' +
-        '<option value="false"' + no + '>No</option>' +
-        '<option value="true"' + yes + '>Yes</option>' +
-        '</select></div>';
-}
-
-function panelDate(label, name, currentVal) {
-    return '<div class="panel-field"><div class="panel-field-label">' + label + '</div>' +
-        '<input type="date" name="' + name + '" value="' + escAttr(currentVal) + '" class="panel-input">' +
-        '</div>';
-}
-
-function escAttr(s) {
-    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function renderMessage(msg) {
-    const msgDate = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
-    const author = msg._author || 'System';
-    const typeIcon = msg.message_type === 'email' ? '✉' :
-                     msg.message_type === 'comment' ? '💬' : '🔔';
-
-    let html = '<div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
-        '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">' +
-        typeIcon + ' ' + escHtml(author) + '</span>' +
-        '<span style="font-size:0.7rem;color:#94a3b8;">' + escHtml(msgDate) + '</span></div>' +
-        '<div style="font-size:0.8rem;color:#475569;line-height:1.5;overflow-wrap:break-word;">' +
-        msg.body + '</div>';
-
-    if (msg._attachments && msg._attachments.length > 0) {
-        html += '<div style="margin-top:0.4rem;">';
-        for (const att of msg._attachments) {
-            const size = att.file_size ? ' (' + (att.file_size / 1024).toFixed(0) + ' KB)' : '';
-            html += '<span style="display:inline-block;font-size:0.7rem;color:#2563eb;' +
-                'background:#eff6ff;padding:0.15rem 0.4rem;border-radius:3px;margin-right:0.3rem;">' +
-                '📎 ' + escHtml(att.name) + size + '</span>';
-        }
-        html += '</div>';
-    }
-
-    html += '</div>';
-    return html;
-}
-
-// ---- Save panel changes to Odoo ----
-
-function savePanel(e) {
-    e.preventDefault();
-    const form = document.getElementById('panelForm');
-    const btn = document.getElementById('panelSaveBtn');
-    const status = document.getElementById('panelSaveStatus');
-    const formData = new FormData(form);
-
-    // Build JSON payload
-    const data = {};
-    for (const [key, val] of formData.entries()) {
-        // Convert booleans
-        if (val === 'true') data[key] = true;
-        else if (val === 'false') data[key] = false;
-        else data[key] = val;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-    status.textContent = '';
-
-    fetch('/api/task/' + currentTaskId + '/update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data),
-    })
-    .then(r => {
-        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Save failed'); });
-        return r.json();
-    })
-    .then(result => {
-        btn.disabled = false;
-        btn.textContent = 'Save Changes';
-        status.textContent = '✓ Saved';
-        status.style.color = '#16a34a';
-        setTimeout(() => { status.textContent = ''; }, 2000);
-    })
-    .catch(err => {
-        btn.disabled = false;
-        btn.textContent = 'Save Changes';
-        status.textContent = '✗ ' + err.message;
-        status.style.color = '#dc2626';
-    });
-
-    return false;
-}
-
-function closePanel() {
-    document.getElementById('panelOverlay').classList.remove('open');
-    document.getElementById('detailPanel').classList.remove('open');
-}
-
-function escHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
-
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
-
-// ---- Post Comment ----
-function postComment(model, recordId) {
-    const box = document.getElementById('commentBox');
-    const status = document.getElementById('commentStatus');
-    const body = box.value.trim();
-    if (!body) return;
-
-    // Optimistically add the comment to the UI immediately
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 16).replace('T', ' ');
-    const loginUser = document.querySelector('.user')?.textContent || 'You';
-
-    const conversationContainer = document.querySelector('.conversation-list');
-    if (conversationContainer) {
-        const newMsg = document.createElement('div');
-        newMsg.style.cssText = 'margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;';
-        newMsg.innerHTML =
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">' +
-            '<span style="font-weight:600;font-size:0.8rem;color:#1a1a1a;">💬 ' + escHtml(loginUser) + '</span>' +
-            '<span style="font-size:0.7rem;color:#94a3b8;">' + dateStr + '</span></div>' +
-            '<div style="font-size:0.8rem;color:#475569;line-height:1.5;">' +
-            escHtml(body).replace(/\n/g, '<br/>') + '</div>';
-        conversationContainer.insertBefore(newMsg, conversationContainer.firstChild);
-
-        // Update count
-        const countEl = document.getElementById('conversationCount');
-        if (countEl) {
-            countEl.textContent = parseInt(countEl.textContent) + 1;
-        }
-    }
-
-    // Clear box immediately
-    box.value = '';
-    status.textContent = 'Posting...';
-    status.style.color = '#94a3b8';
-
-    // Fire API call in background
-    fetch('/api/' + model + '/' + recordId + '/comment', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({body: body}),
-    })
-    .then(r => {
-        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
-        return r.json();
-    })
-    .then(() => {
-        status.textContent = '✓ Saved';
-        status.style.color = '#16a34a';
-        setTimeout(() => { status.textContent = ''; }, 2000);
-    })
-    .catch(err => {
-        status.textContent = '✗ ' + err.message + ' (comment may not have saved)';
-        status.style.color = '#dc2626';
-    });
-}
-
-// ---- Closed Ticket Lookup ----
-function openClosedLookup() {
-    document.getElementById('panelTitle').textContent = 'View Closed Ticket';
-    document.getElementById('panelScore').innerHTML = '';
-    document.getElementById('panelBody').innerHTML =
-        '<div style="padding:1rem 0;">' +
-        '<div class="panel-field-label">Enter Ticket Number</div>' +
-        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;">' +
-        '<input type="text" id="closedTicketRef" placeholder="e.g. 62241" class="panel-input" ' +
-        'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
-        '<button class="btn btn-primary" onclick="lookupClosedTicket()">Look Up</button>' +
-        '</div>' +
-        '<p style="margin-top:0.5rem;font-size:0.75rem;color:#94a3b8;">Enter the ticket ID number shown in Odoo</p>' +
-        '</div>';
-    document.getElementById('panelOverlay').classList.add('open');
-    document.getElementById('detailPanel').classList.add('open');
-    setTimeout(() => document.getElementById('closedTicketRef').focus(), 300);
-}
-
-function lookupClosedTicket() {
-    const ref = document.getElementById('closedTicketRef').value.trim();
-    if (!ref) return;
-
-    document.getElementById('panelBody').innerHTML =
-        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading ticket #' + escHtml(ref) + '...</div>';
-
-    fetch('/api/ticket/lookup/' + encodeURIComponent(ref))
-        .then(r => {
-            if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Not found'); });
-            return r.json();
-        })
-        .then(data => renderClosedTicket(data))
-        .catch(err => {
-            document.getElementById('panelBody').innerHTML =
-                '<div class="error">' + escHtml(err.message) + '</div>' +
-                '<div style="padding:1rem 0;">' +
-                '<div style="display:flex;gap:0.5rem;">' +
-                '<input type="text" id="closedTicketRef" value="' + escAttr(ref) + '" class="panel-input" ' +
-                'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
-                '<button class="btn btn-primary" onclick="lookupClosedTicket()">Try Again</button>' +
-                '</div></div>';
-        });
-}
-
-function renderClosedTicket(data) {
-    const ticket = data.ticket;
-    const task = data.task;
-    const messages = data.messages || [];
-
-    document.getElementById('panelTitle').textContent = '#' + (ticket.ticket_ref || ticket.id);
-
-    // Score (if linked task exists)
-    if (task && task._score !== undefined) {
-        let scoreClass = 'score-low';
-        if (task._score < 10) scoreClass = 'score-critical';
-        else if (task._score < 20) scoreClass = 'score-high';
-        else if (task._score < 30) scoreClass = 'score-medium';
-        document.getElementById('panelScore').innerHTML =
-            '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
-            '<span style="color:#64748b;font-size:0.85rem;">Priority Score</span>';
+// ---- Row click ----
+function handleRowClick(event, taskId) {
+    if (bulkMode) {
+        const row = event.currentTarget;
+        if (selectedIds.has(taskId)) { selectedIds.delete(taskId); row.classList.remove('selected'); }
+        else { selectedIds.add(taskId); row.classList.add('selected'); }
+        updateBulkCount();
     } else {
-        document.getElementById('panelScore').innerHTML =
-            '<span class="badge badge-gray">Closed Ticket</span>';
+        openPanel(taskId);
     }
-
-    let html = '';
-
-    // Title
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Title</div>' +
-        '<div class="panel-field-value">' + escHtml(ticket.name || '—') + '</div></div>';
-
-    // Fields grid
-    const stage = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[1] : ticket.stage_id) : '—';
-    const customer = ticket.partner_id ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[1] : ticket.partner_id) : '—';
-    const assignee = ticket.user_id ? (Array.isArray(ticket.user_id) ? ticket.user_id[1] : ticket.user_id) : '—';
-
-    // Status dropdown (editable to allow reopening)
-    const stageId = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[0] : ticket.stage_id) : '';
-    const opts = fieldOptions || {};
-
-    html += '<div class="panel-grid">';
-
-    html += '<div class="panel-field">' +
-        '<div class="panel-field-label">Status</div>' +
-        '<select id="ticketStageSelect" class="panel-input" data-original="' + stageId + '">' +
-        '<option value="">—</option>';
-    for (const s of (opts.stages || [])) {
-        const selected = String(s.id) === String(stageId) ? ' selected' : '';
-        html += '<option value="' + s.id + '"' + selected + '>' + escHtml(s.name) + '</option>';
-    }
-    html += '</select></div>';
-
-    const readOnlyFields = [
-        {label: 'Customer', value: customer},
-        {label: 'Assignee', value: assignee},
-        {label: 'Priority', value: ticket.priority || '—'},
-        {label: 'Created', value: ticket.create_date ? ticket.create_date.slice(0, 10) : '—'},
-        {label: 'Ticket Ref', value: ticket.ticket_ref || '—'},
-    ];
-
-    for (const f of readOnlyFields) {
-        html += '<div class="panel-field">' +
-            '<div class="panel-field-label">' + f.label + '</div>' +
-            '<div class="panel-field-value">' + escHtml(String(f.value)) + '</div></div>';
-    }
-
-    html += '</div>';
-
-    // Save status button (only visible when changed)
-    html += '<div id="ticketStatusSave" style="margin-top:0.75rem;display:none;align-items:center;gap:0.75rem;">' +
-        '<button class="btn btn-primary btn-sm" onclick="updateTicketStatus(' + ticket.id + ')">Update Status</button>' +
-        '<span id="ticketStatusMsg" style="font-size:0.75rem;color:#94a3b8;"></span>' +
-        '</div>';
-
-    // Description
-    if (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false) {
-        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label">Description</div>' +
-            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;max-height:200px;overflow-y:auto;">' +
-            ticket.description + '</div></div>';
-    }
-
-    // Messages
-    {
-        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">' + messages.length + '</span>)</div>' +
-            '<div class="conversation-list">';
-
-        for (const msg of messages) {
-            html += renderMessage(msg);
-        }
-
-        html += '</div></div>';
-    }
-
-    // Add comment
-    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-        '<div class="panel-field-label" style="margin-bottom:0.5rem;">Add Comment</div>' +
-        '<textarea id="commentBox" rows="3" class="panel-input" ' +
-        'style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
-        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
-        '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\',' + ticket.id + ')">Post Comment</button>' +
-        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span>' +
-        '</div></div>';
-
-    // Look up another
-    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-        '<div style="display:flex;gap:0.5rem;">' +
-        '<input type="text" id="closedTicketRef" placeholder="Look up another..." class="panel-input" ' +
-        'style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
-        '<button class="btn btn-ghost" onclick="lookupClosedTicket()">Look Up</button>' +
-        '</div></div>';
-
-    document.getElementById('panelBody').innerHTML = html;
-
-    // Show save button when status dropdown changes
-    const stageSelect = document.getElementById('ticketStageSelect');
-    const saveDiv = document.getElementById('ticketStatusSave');
-    if (stageSelect && saveDiv) {
-        stageSelect.addEventListener('change', function() {
-            if (this.value !== this.dataset.original) {
-                saveDiv.style.display = 'flex';
-            } else {
-                saveDiv.style.display = 'none';
-            }
-        });
-    }
-}
-
-function updateTicketStatus(ticketId) {
-    const select = document.getElementById('ticketStageSelect');
-    const msg = document.getElementById('ticketStatusMsg');
-    const newStageId = select.value;
-
-    if (!newStageId) return;
-
-    msg.textContent = 'Updating...';
-    msg.style.color = '#94a3b8';
-
-    // Optimistically update the dropdown's "original" to the new value
-    select.dataset.original = newStageId;
-    document.getElementById('ticketStatusSave').style.display = 'none';
-
-    fetch('/api/ticket/' + ticketId + '/update-status', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({stage_id: parseInt(newStageId)}),
-    })
-    .then(r => {
-        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
-        return r.json();
-    })
-    .then(() => {
-        msg.textContent = '✓ Status updated';
-        msg.style.color = '#16a34a';
-        document.getElementById('ticketStatusSave').style.display = 'flex';
-        setTimeout(() => {
-            document.getElementById('ticketStatusSave').style.display = 'none';
-            msg.textContent = '';
-        }, 2000);
-    })
-    .catch(err => {
-        msg.textContent = '✗ ' + err.message;
-        msg.style.color = '#dc2626';
-        document.getElementById('ticketStatusSave').style.display = 'flex';
-    });
 }
 
 // ---- Bulk Edit ----
@@ -831,22 +168,15 @@ function toggleBulkMode() {
     const table = document.getElementById('backlog-table');
     const bar = document.getElementById('bulkBar');
     const btn = document.getElementById('bulkEditToggle');
-
     if (bulkMode) {
         table.classList.add('bulk-mode');
         bar.style.display = 'flex';
-        btn.textContent = 'Cancel Bulk';
-        btn.style.background = '#dc2626';
-        btn.style.color = '#fff';
-        btn.style.borderColor = '#dc2626';
+        btn.textContent = 'Cancel Bulk'; btn.style.background = '#dc2626'; btn.style.color = '#fff'; btn.style.borderColor = '#dc2626';
         populateBulkDropdowns();
     } else {
         table.classList.remove('bulk-mode');
         bar.style.display = 'none';
-        btn.textContent = 'Bulk Edit';
-        btn.style.background = '';
-        btn.style.color = '';
-        btn.style.borderColor = '';
+        btn.textContent = 'Bulk Edit'; btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
         selectedIds.clear();
         document.querySelectorAll('#backlog-table tbody tr').forEach(tr => tr.classList.remove('selected'));
         updateBulkCount();
@@ -855,129 +185,170 @@ function toggleBulkMode() {
 
 function populateBulkDropdowns() {
     const opts = fieldOptions || {};
-    const statusSel = document.getElementById('bulkStatus');
-    const assigneeSel = document.getElementById('bulkAssignee');
-
-    statusSel.innerHTML = '<option value="">— No change —</option>';
-    for (const s of (opts.stages || [])) {
-        statusSel.innerHTML += '<option value="' + s.id + '">' + escHtml(s.name) + '</option>';
-    }
-
-    assigneeSel.innerHTML = '<option value="">— No change —</option>';
-    for (const u of (opts.users || [])) {
-        assigneeSel.innerHTML += '<option value="' + u.id + '">' + escHtml(u.name) + '</option>';
-    }
+    const ss = document.getElementById('bulkStatus');
+    const as = document.getElementById('bulkAssignee');
+    ss.innerHTML = '<option value="">— No change —</option>';
+    (opts.stages || []).forEach(s => ss.innerHTML += '<option value="'+s.id+'">'+escHtml(s.name)+'</option>');
+    as.innerHTML = '<option value="">— No change —</option>';
+    (opts.users || []).forEach(u => as.innerHTML += '<option value="'+u.id+'">'+escHtml(u.name)+'</option>');
 }
 
-function handleRowClick(event, taskId) {
-    if (bulkMode) {
-        const row = event.currentTarget;
-        if (selectedIds.has(taskId)) {
-            selectedIds.delete(taskId);
-            row.classList.remove('selected');
-        } else {
-            selectedIds.add(taskId);
-            row.classList.add('selected');
-        }
-        updateBulkCount();
-    } else {
-        openPanel(taskId);
-    }
-}
-
-function updateBulkCount() {
-    document.getElementById('bulkCount').textContent = selectedIds.size + ' selected';
-}
+function updateBulkCount() { document.getElementById('bulkCount').textContent = selectedIds.size + ' selected'; }
 
 function applyBulkEdit() {
     const ids = Array.from(selectedIds);
-    if (ids.length === 0) return;
-
+    if (!ids.length) return;
     const stageId = document.getElementById('bulkStatus').value;
     const userId = document.getElementById('bulkAssignee').value;
     const msg = document.getElementById('bulkStatus_msg');
-
-    if (!stageId && !userId) {
-        msg.textContent = 'Select a status or assignee to apply';
-        msg.style.color = '#fbbf24';
-        return;
-    }
-
+    if (!stageId && !userId) { msg.textContent = 'Select a status or assignee'; msg.style.color = '#fbbf24'; return; }
     const payload = {task_ids: ids};
     if (stageId) payload.stage_id = stageId;
     if (userId) payload.user_ids = [userId];
-
-    msg.textContent = 'Updating ' + ids.length + ' tasks...';
-    msg.style.color = '#94a3b8';
-
-    // Optimistically update the visible table
+    msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
     const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
-    if (stageLabel) {
-        ids.forEach(id => {
-            const row = document.querySelector('tr[data-task-id="' + id + '"]');
-            if (row) {
-                const cell = row.cells[4]; // 0=score, 1=id, 2=title, 3=customer, 4=status
-                if (cell) cell.innerHTML = '<span class="badge badge-gray">' + escHtml(stageLabel) + '</span>';
-            }
-        });
-    }
+    if (stageLabel) ids.forEach(id => {
+        const row = document.querySelector('tr[data-task-id="'+id+'"]');
+        if (row) { const c = row.cells[4]; if (c) c.innerHTML = '<span class="badge badge-gray">'+escHtml(stageLabel)+'</span>'; }
+    });
+    fetch('/api/tasks/bulk-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
+        .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail); }); return r.json(); })
+        .then(r => { msg.textContent = '✓ Updated '+r.updated; msg.style.color = '#4ade80'; setTimeout(() => msg.textContent = '', 3000); })
+        .catch(e => { msg.textContent = '✗ '+e.message; msg.style.color = '#f87171'; });
+}
 
-    fetch('/api/tasks/bulk-update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload),
-    })
-    .then(r => {
-        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); });
-        return r.json();
-    })
-    .then(result => {
-        msg.textContent = '✓ Updated ' + result.updated + ' tasks';
-        msg.style.color = '#4ade80';
-        setTimeout(() => { msg.textContent = ''; }, 3000);
-    })
-    .catch(err => {
-        msg.textContent = '✗ ' + err.message;
-        msg.style.color = '#f87171';
+// ---- Closed Ticket Lookup ----
+function openClosedLookup() {
+    document.getElementById('panelTitle').textContent = 'View Closed Ticket';
+    document.getElementById('panelScore').innerHTML = '';
+    document.getElementById('panelBody').innerHTML =
+        '<div style="padding:1rem 0;"><div class="panel-field-label">Enter Ticket Number</div>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;">' +
+        '<input type="text" id="closedTicketRef" placeholder="e.g. 62241" class="panel-input" style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+        '<button class="btn btn-primary" onclick="lookupClosedTicket()">Look Up</button></div>' +
+        '<p style="margin-top:0.5rem;font-size:0.75rem;color:#94a3b8;">Enter the ticket ID number shown in Odoo</p></div>';
+    document.getElementById('panelOverlay').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+    setTimeout(() => document.getElementById('closedTicketRef').focus(), 300);
+}
+
+function lookupClosedTicket() {
+    const ref = document.getElementById('closedTicketRef').value.trim();
+    if (!ref) return;
+    document.getElementById('panelBody').innerHTML = '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading #'+escHtml(ref)+'...</div>';
+    fetch('/api/ticket/lookup/'+encodeURIComponent(ref))
+        .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Not found'); }); return r.json(); })
+        .then(data => renderClosedTicket(data))
+        .catch(err => {
+            document.getElementById('panelBody').innerHTML = '<div class="error">'+escHtml(err.message)+'</div>' +
+                '<div style="padding:1rem 0;"><div style="display:flex;gap:0.5rem;">' +
+                '<input type="text" id="closedTicketRef" value="'+escAttr(ref)+'" class="panel-input" style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+                '<button class="btn btn-primary" onclick="lookupClosedTicket()">Try Again</button></div></div>';
+        });
+}
+
+function renderClosedTicket(data) {
+    const ticket = data.ticket, task = data.task, messages = data.messages || [];
+    const opts = fieldOptions || {};
+    document.getElementById('panelTitle').textContent = '#'+(ticket.ticket_ref || ticket.id);
+    document.getElementById('panelScore').innerHTML = task && task._score !== undefined
+        ? '<span class="score '+(task._score<10?'score-critical':task._score<20?'score-high':task._score<30?'score-medium':'score-low')+'">'+task._score+'</span><span style="color:#64748b;font-size:0.85rem;">Priority Score</span>'
+        : '<span class="badge badge-gray">Ticket</span>';
+
+    let html = '<div class="panel-field"><div class="panel-field-label">Title</div><div class="panel-field-value">'+escHtml(ticket.name||'—')+'</div></div>';
+    const stage = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[1] : ticket.stage_id) : '—';
+    const stageId = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[0] : ticket.stage_id) : '';
+    const customer = ticket.partner_id ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[1] : ticket.partner_id) : '—';
+    const assignee = ticket.user_id ? (Array.isArray(ticket.user_id) ? ticket.user_id[1] : ticket.user_id) : '—';
+
+    html += '<div class="panel-grid">';
+    // Status dropdown
+    html += '<div class="panel-field"><div class="panel-field-label">Status</div><select id="ticketStageSelect" class="panel-input" data-original="'+stageId+'"><option value="">—</option>';
+    (opts.stages||[]).forEach(s => { html += '<option value="'+s.id+'"'+(String(s.id)===String(stageId)?' selected':'')+'>'+escHtml(s.name)+'</option>'; });
+    html += '</select></div>';
+    [{l:'Customer',v:customer},{l:'Assignee',v:assignee},{l:'Priority',v:ticket.priority||'—'},{l:'Created',v:ticket.create_date?ticket.create_date.slice(0,10):'—'},{l:'Ticket Ref',v:ticket.ticket_ref||'—'}].forEach(f => {
+        html += '<div class="panel-field"><div class="panel-field-label">'+f.l+'</div><div class="panel-field-value">'+escHtml(String(f.v))+'</div></div>';
+    });
+    html += '</div>';
+    html += '<div id="ticketStatusSave" style="margin-top:0.75rem;display:none;align-items:center;gap:0.75rem;">' +
+        '<button class="btn btn-primary btn-sm" onclick="updateTicketStatus('+ticket.id+')">Update Status</button>' +
+        '<span id="ticketStatusMsg" style="font-size:0.75rem;color:#94a3b8;"></span></div>';
+
+    if (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false)
+        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div class="panel-field-label">Description</div><div style="font-size:0.85rem;color:#374151;line-height:1.6;max-height:200px;overflow-y:auto;">'+ticket.description+'</div></div>';
+
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (<span id="conversationCount">'+messages.length+'</span>)</div><div class="conversation-list">';
+    messages.forEach(msg => html += renderMessage(msg));
+    html += '</div></div>';
+    html += '<div style="margin-top:1rem;"><textarea id="commentBox" rows="3" class="panel-input" style="resize:vertical;min-height:60px;" placeholder="Write a comment..."></textarea>' +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center;">' +
+        '<button class="btn btn-primary btn-sm" onclick="postComment(\'ticket\','+ticket.id+')">Post Comment</button>' +
+        '<span id="commentStatus" style="font-size:0.75rem;color:#94a3b8;"></span></div></div>';
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div style="display:flex;gap:0.5rem;">' +
+        '<input type="text" id="closedTicketRef" placeholder="Look up another..." class="panel-input" style="flex:1;" onkeydown="if(event.key===\'Enter\')lookupClosedTicket()">' +
+        '<button class="btn btn-ghost" onclick="lookupClosedTicket()">Look Up</button></div></div>';
+
+    document.getElementById('panelBody').innerHTML = html;
+    const sel = document.getElementById('ticketStageSelect'), save = document.getElementById('ticketStatusSave');
+    if (sel && save) sel.addEventListener('change', function() { save.style.display = this.value !== this.dataset.original ? 'flex' : 'none'; });
+}
+
+function updateTicketStatus(ticketId) {
+    const sel = document.getElementById('ticketStageSelect'), msg = document.getElementById('ticketStatusMsg');
+    if (!sel.value) return;
+    msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
+    sel.dataset.original = sel.value;
+    document.getElementById('ticketStatusSave').style.display = 'none';
+    fetch('/api/ticket/'+ticketId+'/update-status', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage_id:parseInt(sel.value)}) })
+        .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail); }); return r.json(); })
+        .then(() => { msg.textContent = '✓ Updated'; msg.style.color = '#16a34a'; document.getElementById('ticketStatusSave').style.display = 'flex'; setTimeout(() => { document.getElementById('ticketStatusSave').style.display = 'none'; }, 2000); })
+        .catch(e => { msg.textContent = '✗ '+e.message; msg.style.color = '#dc2626'; document.getElementById('ticketStatusSave').style.display = 'flex'; });
+}
+
+// ---- Filter dropdowns ----
+const table = document.getElementById('backlog-table');
+const filterSelects = table.querySelectorAll('.filter-row select');
+filterSelects.forEach(select => {
+    const col = parseInt(select.dataset.col);
+    const values = new Set();
+    table.querySelectorAll('tbody tr').forEach(row => { const t = row.cells[col].textContent.trim(); if (t) values.add(t); });
+    Array.from(values).sort((a,b) => { const na=parseFloat(a),nb=parseFloat(b); if(!isNaN(na)&&!isNaN(nb)) return na-nb; return a.localeCompare(b); })
+        .forEach(val => { const o = document.createElement('option'); o.value = val; o.textContent = val; select.appendChild(o); });
+    select.addEventListener('change', applyFilters);
+    select.addEventListener('click', e => e.stopPropagation());
+});
+
+function applyFilters() {
+    const filters = {};
+    filterSelects.forEach(s => { const c = parseInt(s.dataset.col), v = s.value; if (v) filters[c] = v; });
+    table.querySelectorAll('tbody tr').forEach(row => {
+        let vis = true;
+        for (const [c,f] of Object.entries(filters)) { if (row.cells[parseInt(c)].textContent.trim() !== f) { vis = false; break; } }
+        row.style.display = vis ? '' : 'none';
     });
 }
 
 // ---- Sorting ----
 const headers = table.querySelectorAll('th.sortable');
 let currentSort = {col: 0, dir: 'asc'};
-
 headers.forEach(th => {
     th.addEventListener('click', () => {
-        const col = parseInt(th.dataset.col);
-        const type = th.dataset.type;
+        const col = parseInt(th.dataset.col), type = th.dataset.type;
         let dir = 'asc';
-
         if (currentSort.col === col && currentSort.dir === 'asc') dir = 'desc';
-
-        headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
-        th.classList.add('sort-' + dir);
+        headers.forEach(h => h.classList.remove('sort-asc','sort-desc'));
+        th.classList.add('sort-'+dir);
         currentSort = {col, dir};
-
         const tbody = table.querySelector('tbody');
         const rows = Array.from(tbody.querySelectorAll('tr'));
-
-        rows.sort((a, b) => {
-            let va = a.cells[col].textContent.trim();
-            let vb = b.cells[col].textContent.trim();
-
-            if (type === 'num') {
-                va = parseFloat(va) || 0;
-                vb = parseFloat(vb) || 0;
-                return dir === 'asc' ? va - vb : vb - va;
-            }
-
-            va = va.toLowerCase();
-            vb = vb.toLowerCase();
-            if (va < vb) return dir === 'asc' ? -1 : 1;
-            if (va > vb) return dir === 'asc' ? 1 : -1;
+        rows.sort((a,b) => {
+            let va = a.cells[col].textContent.trim(), vb = b.cells[col].textContent.trim();
+            if (type === 'num') { va = parseFloat(va)||0; vb = parseFloat(vb)||0; return dir==='asc' ? va-vb : vb-va; }
+            va = va.toLowerCase(); vb = vb.toLowerCase();
+            if (va < vb) return dir==='asc' ? -1 : 1;
+            if (va > vb) return dir==='asc' ? 1 : -1;
             return 0;
         });
-
         rows.forEach(r => tbody.appendChild(r));
     });
 });

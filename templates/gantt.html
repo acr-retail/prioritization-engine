@@ -4,224 +4,48 @@
 
 {% block head %}
 <style>
-    .gantt-controls {
-        display: flex;
-        gap: 0.75rem;
-        align-items: center;
-        flex-wrap: wrap;
-        margin-bottom: 1rem;
-    }
-    .gantt-controls label {
-        font-size: 0.75rem;
-        color: #64748b;
-        margin: 0;
-    }
-    .gantt-controls select, .gantt-controls input {
-        font-size: 0.8rem;
-        padding: 0.3rem 0.5rem;
-        width: auto;
-    }
+    .gantt-controls { display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem; }
+    .gantt-controls label { font-size:0.75rem; color:#64748b; margin:0; }
+    .gantt-controls select { font-size:0.8rem; padding:0.3rem 0.5rem; width:auto; }
+    .gantt-wrapper { display:flex; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#fff; }
 
-    .gantt-wrapper {
-        display: flex;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        overflow: hidden;
-        background: #fff;
-    }
+    .gantt-labels { min-width:280px; max-width:280px; border-right:2px solid #e2e8f0; flex-shrink:0; overflow:hidden; }
+    .gantt-labels-inner { }
+    .gantt-labels .lbl-header { height:48px; display:flex; align-items:center; padding:0 0.75rem; background:#f8fafc; border-bottom:1px solid #e2e8f0; font-weight:600; font-size:0.8rem; color:#475569; }
+    .gantt-group-lbl { height:32px; display:flex; align-items:center; padding:0 0.75rem; background:#f1f5f9; font-weight:700; font-size:0.8rem; border-bottom:1px solid #e2e8f0; }
+    .gantt-task-lbl { height:36px; display:flex; align-items:center; padding:0 0.75rem; border-bottom:1px solid #f1f5f9; font-size:0.75rem; cursor:pointer; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .gantt-task-lbl:hover { background:#f8fafc; }
+    .gantt-task-lbl .ts { display:inline-flex; align-items:center; justify-content:center; min-width:28px; padding:0.1rem 0.3rem; border-radius:3px; font-weight:700; font-size:0.7rem; margin-right:0.5rem; flex-shrink:0; color:#fff; }
+    .gantt-task-lbl .tn { overflow:hidden; text-overflow:ellipsis; }
 
-    /* Left panel: task list */
-    .gantt-labels {
-        min-width: 280px;
-        max-width: 280px;
-        border-right: 2px solid #e2e8f0;
-        flex-shrink: 0;
-        overflow-y: auto;
-    }
+    .gantt-timeline { flex:1; overflow:auto; }
+    .gantt-tl-inner { position:relative; }
+    .gantt-dates { height:48px; display:flex; align-items:flex-end; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+    .gantt-dc { text-align:center; font-size:0.6rem; color:#94a3b8; border-right:1px solid #f1f5f9; padding-bottom:4px; flex-shrink:0; }
+    .gantt-dc.we { background:#fafafa; }
+    .gantt-dc.today { background:#eff6ff; color:#2563eb; font-weight:700; }
+    .gantt-dc .dn { font-size:0.7rem; color:#475569; }
+    .gantt-dc.today .dn { color:#2563eb; }
+    .gantt-gr { height:36px; display:flex; border-bottom:1px solid #f1f5f9; }
+    .gantt-gg { height:32px; display:flex; background:#f1f5f9; border-bottom:1px solid #e2e8f0; }
+    .gantt-gc { border-right:1px solid #f8fafc; flex-shrink:0; }
+    .gantt-gc.we { background:rgba(0,0,0,0.015); }
+    .gantt-gc.today { background:rgba(37,99,235,0.04); }
 
-    .gantt-labels .gantt-header-row {
-        height: 48px;
-        display: flex;
-        align-items: center;
-        padding: 0 0.75rem;
-        background: #f8fafc;
-        border-bottom: 1px solid #e2e8f0;
-        font-weight: 600;
-        font-size: 0.8rem;
-        color: #475569;
-    }
-
-    .gantt-group-header {
-        height: 32px;
-        display: flex;
-        align-items: center;
-        padding: 0 0.75rem;
-        background: #f1f5f9;
-        font-weight: 700;
-        font-size: 0.8rem;
-        color: #1a1a1a;
-        border-bottom: 1px solid #e2e8f0;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .gantt-group-header:hover { background: #e2e8f0; }
-
-    .gantt-task-row {
-        height: 36px;
-        display: flex;
-        align-items: center;
-        padding: 0 0.75rem;
-        border-bottom: 1px solid #f1f5f9;
-        font-size: 0.75rem;
-        cursor: pointer;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-    }
-
-    .gantt-task-row:hover { background: #f8fafc; }
-
-    .gantt-task-row .task-score {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 28px;
-        padding: 0.1rem 0.3rem;
-        border-radius: 3px;
-        font-weight: 700;
-        font-size: 0.7rem;
-        margin-right: 0.5rem;
-        flex-shrink: 0;
-    }
-
-    .gantt-task-row .task-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    /* Right panel: timeline */
-    .gantt-timeline {
-        flex: 1;
-        overflow-x: auto;
-        overflow-y: auto;
-    }
-
-    .gantt-timeline-inner {
-        position: relative;
-        min-height: 100%;
-    }
-
-    .gantt-dates-header {
-        height: 48px;
-        display: flex;
-        align-items: flex-end;
-        background: #f8fafc;
-        border-bottom: 1px solid #e2e8f0;
-        position: sticky;
-        top: 0;
-        z-index: 2;
-    }
-
-    .gantt-date-cell {
-        min-width: 36px;
-        max-width: 36px;
-        text-align: center;
-        font-size: 0.6rem;
-        color: #94a3b8;
-        border-right: 1px solid #f1f5f9;
-        padding-bottom: 4px;
-    }
-
-    .gantt-date-cell.weekend { background: #fafafa; }
-    .gantt-date-cell.today { background: #eff6ff; color: #2563eb; font-weight: 700; }
-    .gantt-date-cell .day-num { font-size: 0.7rem; color: #475569; }
-    .gantt-date-cell.today .day-num { color: #2563eb; }
-
-    .gantt-grid-row {
-        height: 36px;
-        display: flex;
-        border-bottom: 1px solid #f1f5f9;
-        position: relative;
-    }
-
-    .gantt-grid-group {
-        height: 32px;
-        display: flex;
-        background: #f1f5f9;
-        border-bottom: 1px solid #e2e8f0;
-    }
-
-    .gantt-grid-cell {
-        min-width: 36px;
-        max-width: 36px;
-        border-right: 1px solid #f8fafc;
-    }
-
-    .gantt-grid-cell.weekend { background: rgba(0,0,0,0.015); }
-    .gantt-grid-cell.today { background: rgba(37,99,235,0.04); }
-
-    /* Task bar */
-    .gantt-bar {
-        position: absolute;
-        height: 22px;
-        top: 7px;
-        border-radius: 4px;
-        cursor: grab;
-        font-size: 0.65rem;
-        color: #fff;
-        display: flex;
-        align-items: center;
-        padding: 0 6px;
-        overflow: hidden;
-        white-space: nowrap;
-        min-width: 20px;
-        z-index: 1;
-        transition: box-shadow 0.15s;
-    }
-
-    .gantt-bar:hover {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        z-index: 5;
-    }
-
-    .gantt-bar.dragging {
-        opacity: 0.8;
-        cursor: grabbing;
-        z-index: 10;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-
-    /* Resize handle */
-    .gantt-bar-resize {
-        position: absolute;
-        right: 0;
-        top: 0;
-        width: 8px;
-        height: 100%;
-        cursor: ew-resize;
-    }
-
-    /* Today line */
-    .today-line {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        width: 2px;
-        background: #dc2626;
-        z-index: 3;
-        pointer-events: none;
-    }
-
-    /* Sync scroll */
-    .gantt-labels, .gantt-timeline { scrollbar-width: thin; }
+    .gantt-bar { position:absolute; height:22px; border-radius:4px; cursor:grab; font-size:0.65rem; color:#fff; display:flex; align-items:center; padding:0 6px; overflow:hidden; white-space:nowrap; min-width:12px; z-index:1; transition:box-shadow 0.15s; }
+    .gantt-bar:hover { box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:5; }
+    .gantt-bar.dragging { opacity:0.8; cursor:grabbing; z-index:10; box-shadow:0 4px 12px rgba(0,0,0,0.3); }
+    .gantt-bar-resize { position:absolute; right:0; top:0; width:8px; height:100%; cursor:ew-resize; }
+    .gantt-deadline { position:absolute; height:22px; width:2px; background:#dc2626; z-index:2; pointer-events:none; }
+    .gantt-deadline::after { content:'⚑'; position:absolute; top:-12px; left:-4px; font-size:10px; color:#dc2626; }
+    .today-line { position:absolute; top:0; bottom:0; width:2px; background:#dc2626; z-index:3; pointer-events:none; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div id="pageLoading" style="display:flex;align-items:center;gap:0.75rem;padding:1rem 0;">
     <div class="spinner"></div>
-    <span style="font-size:0.85rem;color:#64748b;">Loading Gantt data from Odoo...</span>
+    <span style="font-size:0.85rem;color:#64748b;">Loading Gantt data...</span>
 </div>
 
 <div class="page-header">
@@ -229,417 +53,365 @@
         <h1>Gantt View</h1>
         <p class="subtitle">{{ task_count }} open tasks — drag bars to reschedule, click to view details</p>
     </div>
+    <button class="btn btn-ghost" onclick="toggleGanttHelp()">Help</button>
+</div>
+
+<div id="ganttHelp" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1rem;font-size:0.8rem;color:#374151;line-height:1.7;position:relative;">
+    <button onclick="toggleGanttHelp()" style="position:absolute;top:0.75rem;right:1rem;background:none;border:none;font-size:1.1rem;cursor:pointer;color:#94a3b8;">✕</button>
+    <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.75rem;">How Gantt Scheduling Works</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem 2rem;">
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Bar Position & Length</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Start Date</strong> determines where the bar begins</li>
+                <li><strong>End Date</strong> determines where the bar ends</li>
+                <li>If no End Date is set, the bar length defaults to the Level of Effort duration</li>
+                <li>If no Start Date is set, the bar starts at today</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Constraints</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Level of Effort</strong> sets the minimum bar duration — the bar cannot be shorter than this</li>
+                <li><strong>Deadline</strong> (red flag) is a hard limit — the bar cannot extend past this date</li>
+                <li>Effort mapping: &lt;10 Hrs = 1 day, 10-40 Hrs = 5 days, 41-100 Hrs = 12 days, &gt;100 Hrs = 25 days</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Interactions</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Drag a bar</strong> horizontally to change the Start and End dates together</li>
+                <li><strong>Drag the right edge</strong> to resize (change End Date only)</li>
+                <li><strong>Click a bar</strong> to open the task editor panel</li>
+                <li>All changes save to Odoo automatically</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Colors</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><span style="display:inline-block;width:12px;height:12px;background:#93b5e6;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>Blue</strong> — assigned to a developer</li>
+                <li><span style="display:inline-block;width:12px;height:12px;background:#e57373;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>Red</strong> — unassigned</li>
+                <li><span style="display:inline-block;width:2px;height:12px;background:#dc2626;vertical-align:middle;margin-right:4px;"></span> <strong>Red line</strong> — today</li>
+                <li><span style="color:#dc2626;margin-right:4px;">⚑</span> <strong>Red flag</strong> — deadline marker</li>
+            </ul>
+        </div>
+    </div>
 </div>
 
 <div class="gantt-controls">
-    <div>
-        <label>Group by:</label>
+    <div><label>Group by:</label>
         <select id="groupBy" onchange="rebuildGantt()">
-            <option value="assignee">Assignee</option>
-            <option value="customer">Customer</option>
-            <option value="status">Status</option>
-            <option value="none">No grouping</option>
-        </select>
-    </div>
-    <div>
-        <label>Filter Customer:</label>
-        <select id="filterCustomer" onchange="rebuildGantt()">
-            <option value="">All</option>
-        </select>
-    </div>
-    <div>
-        <label>Filter Assignee:</label>
-        <select id="filterAssignee" onchange="rebuildGantt()">
-            <option value="">All</option>
-        </select>
-    </div>
-    <div>
-        <label>Filter Status:</label>
-        <select id="filterStatus" onchange="rebuildGantt()">
-            <option value="">All</option>
-        </select>
-    </div>
-    <div>
-        <label>Zoom:</label>
+            <option value="assignee">Assignee</option><option value="customer">Customer</option>
+            <option value="status">Status</option><option value="none">No grouping</option>
+        </select></div>
+    <div><label>Customer:</label><select id="filterCustomer" onchange="rebuildGantt()"><option value="">All</option></select></div>
+    <div><label>Assignee:</label><select id="filterAssignee" onchange="rebuildGantt()"><option value="">All</option></select></div>
+    <div><label>Status:</label><select id="filterStatus" onchange="rebuildGantt()"><option value="">All</option></select></div>
+    <div><label>Zoom:</label>
         <select id="zoomLevel" onchange="rebuildGantt()">
-            <option value="14">2 Weeks</option>
-            <option value="30" selected>1 Month</option>
-            <option value="60">2 Months</option>
-            <option value="90">3 Months</option>
-        </select>
-    </div>
+            <option value="day">Daily</option><option value="week" selected>Weekly</option>
+            <option value="month">Monthly</option><option value="quarter">Quarterly</option>
+        </select></div>
 </div>
 
-<div class="gantt-wrapper" id="ganttWrapper" style="max-height: calc(100vh - 220px);">
+<div class="gantt-wrapper" id="ganttWrapper" style="max-height:calc(100vh - 220px);">
     <div class="gantt-labels" id="ganttLabels"></div>
     <div class="gantt-timeline" id="ganttTimeline"></div>
 </div>
 
-<!-- Detail Panel (reuse from backlog) -->
-<div class="panel-overlay" id="panelOverlay" onclick="closePanel()"></div>
-<div class="panel" id="detailPanel">
-    <div class="panel-header">
-        <h2 id="panelTitle">Task Details</h2>
-        <button class="panel-close" onclick="closePanel()">✕</button>
-    </div>
-    <div class="panel-score" id="panelScore"></div>
-    <div class="panel-body" id="panelBody"></div>
-</div>
-
-<script id="taskData" type="application/json">
-{{ task_json | safe }}
-</script>
+<script id="taskData" type="application/json">{{ task_json | safe }}</script>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.getElementById('pageLoading').style.display = 'none';
 
-const allTasks = JSON.parse(document.getElementById('taskData').textContent);
-const taskMap = {};
-allTasks.forEach(t => taskMap[t.id] = t);
-
-// Bar colors by score
-function barColor(score) {
-    if (score < 10) return '#dc2626';
-    if (score < 20) return '#ea580c';
-    if (score < 30) return '#ca8a04';
-    return '#16a34a';
+function toggleGanttHelp() {
+    const el = document.getElementById('ganttHelp');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-// ---- Populate filter dropdowns ----
-const customers = [...new Set(allTasks.map(t => t._customer).filter(Boolean))].sort();
-const assignees = [...new Set(allTasks.map(t => t._assignee).filter(Boolean))].sort();
-const statuses = [...new Set(allTasks.map(t => t._stage).filter(Boolean))].sort();
+const allTasks = JSON.parse(document.getElementById('taskData').textContent);
+allTasks.forEach(t => taskMap[t.id] = t);
 
-customers.forEach(c => document.getElementById('filterCustomer').innerHTML += '<option value="'+escHtml(c)+'">'+escHtml(c)+'</option>');
-assignees.forEach(a => document.getElementById('filterAssignee').innerHTML += '<option value="'+escHtml(a)+'">'+escHtml(a)+'</option>');
-statuses.forEach(s => document.getElementById('filterStatus').innerHTML += '<option value="'+escHtml(s)+'">'+escHtml(s)+'</option>');
+const ASSIGNED_COLOR = '#93b5e6';
+const UNASSIGNED_COLOR = '#e57373';
+function barColor(t) { return (t._assignee && t._assignee !== 'Unassigned') ? ASSIGNED_COLOR : UNASSIGNED_COLOR; }
 
-// ---- Date helpers ----
-function parseDate(s) { return new Date(s + 'T00:00:00'); }
-function formatDateShort(d) { return d.toISOString().slice(0, 10); }
-function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-function diffDays(a, b) { return Math.round((b - a) / 86400000); }
-function isWeekend(d) { const day = d.getDay(); return day === 0 || day === 6; }
+// Filters
+const _c = [...new Set(allTasks.map(t=>t._customer).filter(Boolean))].sort();
+const _a = [...new Set(allTasks.map(t=>t._assignee).filter(Boolean))].sort();
+const _s = [...new Set(allTasks.map(t=>t._stage).filter(Boolean))].sort();
+_c.forEach(c => document.getElementById('filterCustomer').innerHTML += '<option>'+escHtml(c)+'</option>');
+_a.forEach(a => document.getElementById('filterAssignee').innerHTML += '<option>'+escHtml(a)+'</option>');
+_s.forEach(s => document.getElementById('filterStatus').innerHTML += '<option>'+escHtml(s)+'</option>');
 
-const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Date helpers
+function pd(s){return new Date(s+'T00:00:00')} function fd(d){return d.toISOString().slice(0,10)}
+function ad(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r}
+function dd(a,b){return Math.round((b-a)/86400000)}
+function iw(d){return d.getDay()===0||d.getDay()===6}
+function sw(d){const r=new Date(d);r.setDate(r.getDate()-r.getDay());return r}
+const dn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// ---- Build Gantt ----
+let CW, periods, startDate, totalW;
+
+function setupZoom() {
+    const z = document.getElementById('zoomLevel').value;
+    const today = new Date(); today.setHours(0,0,0,0);
+    periods = [];
+
+    if (z === 'day') {
+        CW = 28; startDate = ad(today, -3);
+        for (let d=new Date(startDate); d<=ad(today,90); d=ad(d,1))
+            periods.push({d:new Date(d), lbl:d.getDate(), sub:dn[d.getDay()], today:fd(d)===fd(today), we:iw(d), mo:d.getDate()===1||periods.length===0?mn[d.getMonth()]:null});
+    } else if (z === 'week') {
+        CW = 100; startDate = sw(ad(today,-7));
+        for (let d=new Date(startDate); d<=ad(today,90); d=ad(d,7)) {
+            const e=ad(d,6);
+            periods.push({d:new Date(d), lbl:mn[d.getMonth()]+' '+d.getDate(), sub:'→ '+e.getDate(), today:today>=d&&today<=e, we:false, mo:null});
+        }
+    } else if (z === 'month') {
+        CW = 120; startDate = new Date(today.getFullYear(), today.getMonth()-1, 1);
+        for (let i=0;i<14;i++){const d=new Date(startDate.getFullYear(),startDate.getMonth()+i,1);
+            periods.push({d, lbl:mn[d.getMonth()], sub:d.getFullYear(), today:d.getMonth()===today.getMonth()&&d.getFullYear()===today.getFullYear(), we:false, mo:null});}
+    } else {
+        CW = 160; startDate = new Date(today.getFullYear(), Math.floor(today.getMonth()/3)*3-3, 1);
+        for (let i=0;i<8;i++){const d=new Date(startDate.getFullYear(),startDate.getMonth()+i*3,1);
+            periods.push({d, lbl:'Q'+(Math.floor(d.getMonth()/3)+1), sub:d.getFullYear(), today:false, we:false, mo:null});}
+    }
+    totalW = periods.length * CW;
+}
+
+function d2px(d) {
+    const ms = d.getTime() - startDate.getTime();
+    const span = periods[periods.length-1].d.getTime() - startDate.getTime();
+    if (span === 0) return 0;
+    return (ms / span) * totalW;
+}
+
+function px2d(px) {
+    const span = periods[periods.length-1].d.getTime() - startDate.getTime();
+    return new Date(startDate.getTime() + (px / totalW) * span);
+}
+
 function rebuildGantt() {
-    const groupBy = document.getElementById('groupBy').value;
-    const filterCust = document.getElementById('filterCustomer').value;
-    const filterAssign = document.getElementById('filterAssignee').value;
-    const filterStat = document.getElementById('filterStatus').value;
-    const days = parseInt(document.getElementById('zoomLevel').value);
+    setupZoom();
+    const gBy = document.getElementById('groupBy').value;
+    const fC = document.getElementById('filterCustomer').value;
+    const fA = document.getElementById('filterAssignee').value;
+    const fS = document.getElementById('filterStatus').value;
 
-    // Filter tasks
     let tasks = allTasks.filter(t => {
-        if (filterCust && t._customer !== filterCust) return false;
-        if (filterAssign && t._assignee !== filterAssign) return false;
-        if (filterStat && t._stage !== filterStat) return false;
+        if (fC && t._customer !== fC) return false;
+        if (fA && t._assignee !== fA) return false;
+        if (fS && t._stage !== fS) return false;
         return true;
     });
 
-    // Date range
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const startDate = addDays(today, -3); // show 3 days before today
-    const endDate = addDays(today, days);
-    const totalDays = diffDays(startDate, endDate);
-    const cellWidth = 36;
-    const totalWidth = totalDays * cellWidth;
-
-    // Group tasks
     const groups = {};
     tasks.forEach(t => {
-        let key;
-        if (groupBy === 'assignee') key = t._assignee || 'Unassigned';
-        else if (groupBy === 'customer') key = t._customer || 'No Customer';
-        else if (groupBy === 'status') key = t._stage || 'Unknown';
-        else key = '__all__';
+        let k = gBy==='assignee'?(t._assignee||'Unassigned'):gBy==='customer'?(t._customer||'No Customer'):gBy==='status'?(t._stage||'Unknown'):'__all__';
+        if (!groups[k]) groups[k]=[];
+        groups[k].push(t);
+    });
+    const gKeys = Object.keys(groups).sort((a,b)=>{if(a==='Unassigned'||a==='No Customer')return 1;if(b==='Unassigned'||b==='No Customer')return -1;return a.localeCompare(b);});
 
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(t);
+    // Headers
+    let dH='';
+    periods.forEach(p=>{
+        let c='gantt-dc';if(p.we)c+=' we';if(p.today)c+=' today';
+        dH+='<div class="'+c+'" style="min-width:'+CW+'px;max-width:'+CW+'px;">';
+        if(p.mo)dH+='<div style="font-size:0.55rem">'+p.mo+'</div>';
+        else if(p.sub)dH+='<div style="font-size:0.55rem">'+p.sub+'</div>';
+        dH+='<div class="dn">'+p.lbl+'</div></div>';
     });
 
-    // Sort groups
-    const groupKeys = Object.keys(groups).sort((a, b) => {
-        if (a === 'Unassigned' || a === 'No Customer') return 1;
-        if (b === 'Unassigned' || b === 'No Customer') return -1;
-        return a.localeCompare(b);
-    });
+    let lH='<div class="lbl-header">Tasks</div>';
+    let gH='', bH='';
+    let ri=0;
 
-    // Build labels
-    let labelsHtml = '<div class="gantt-header-row">Tasks</div>';
-    // Build timeline header
-    let datesHtml = '';
-    for (let i = 0; i < totalDays; i++) {
-        const d = addDays(startDate, i);
-        const isToday = formatDateShort(d) === formatDateShort(today);
-        const we = isWeekend(d);
-        let cls = 'gantt-date-cell';
-        if (we) cls += ' weekend';
-        if (isToday) cls += ' today';
-        const showMonth = i === 0 || d.getDate() === 1;
-        datesHtml += '<div class="' + cls + '">' +
-            (showMonth ? '<div style="font-size:0.55rem;">' + monthNames[d.getMonth()] + '</div>' : '') +
-            '<div class="day-num">' + d.getDate() + '</div>' +
-            '<div>' + dayNames[d.getDay()] + '</div></div>';
-    }
-
-    let gridHtml = '';
-    let barsHtml = '';
-    let rowIndex = 0;
-
-    groupKeys.forEach(groupName => {
-        const groupTasks = groups[groupName];
-
-        if (groupBy !== 'none') {
-            labelsHtml += '<div class="gantt-group-header">' + escHtml(groupName) + ' (' + groupTasks.length + ')</div>';
-            gridHtml += '<div class="gantt-grid-group">';
-            for (let i = 0; i < totalDays; i++) gridHtml += '<div class="gantt-grid-cell"></div>';
-            gridHtml += '</div>';
-            rowIndex++;
+    gKeys.forEach(gn=>{
+        const gt=groups[gn];
+        if(gBy!=='none'){
+            lH+='<div class="gantt-group-lbl">'+escHtml(gn)+' ('+gt.length+')</div>';
+            gH+='<div class="gantt-gg">';
+            periods.forEach(()=>gH+='<div class="gantt-gc" style="min-width:'+CW+'px;max-width:'+CW+'px"></div>');
+            gH+='</div>';
+            ri++;
         }
+        gt.sort((a,b)=>a._score-b._score);
+        gt.forEach(task=>{
+            const col=barColor(task);
+            lH+='<div class="gantt-task-lbl" onclick="openPanel('+task.id+')" title="'+escAttr(task.name)+'">'+
+                '<span class="ts" style="background:'+col+'">'+task._score+'</span>'+
+                '<span class="tn">'+escHtml(task.name.slice(0,35))+'</span></div>';
 
-        groupTasks.sort((a, b) => a._score - b._score);
+            gH+='<div class="gantt-gr">';
+            periods.forEach(p=>{let c='gantt-gc';if(p.we)c+=' we';if(p.today)c+=' today';
+                gH+='<div class="'+c+'" style="min-width:'+CW+'px;max-width:'+CW+'px"></div>';});
+            gH+='</div>';
 
-        groupTasks.forEach(task => {
-            // Label
-            const scoreColor = barColor(task._score);
-            labelsHtml += '<div class="gantt-task-row" onclick="openTaskPanel(' + task.id + ')" title="' + escAttr(task.name) + '">' +
-                '<span class="task-score" style="background:' + scoreColor + ';color:#fff;">' + task._score + '</span>' +
-                '<span class="task-name">' + escHtml(task.name.slice(0, 40)) + '</span></div>';
+            // Bar: start to end date
+            const ts=pd(task._start);
+            const te=pd(task._end);
+            const bL=d2px(ts);
+            const bW=Math.max(CW*0.5, d2px(te)-bL);
+            const bT=ri*36+48+7;
+            const dl=task._deadline;
+            const minDur=task._min_duration||1;
 
-            // Grid row
-            gridHtml += '<div class="gantt-grid-row" data-row="' + rowIndex + '">';
-            for (let i = 0; i < totalDays; i++) {
-                const d = addDays(startDate, i);
-                let cls = 'gantt-grid-cell';
-                if (isWeekend(d)) cls += ' weekend';
-                if (formatDateShort(d) === formatDateShort(today)) cls += ' today';
-                gridHtml += '<div class="' + cls + '"></div>';
+            if(bL<totalW && bL+bW>0){
+                bH+='<div class="gantt-bar" data-task-id="'+task.id+'" data-deadline="'+(dl||'')+'" data-min-dur="'+minDur+'" '+
+                    'style="left:'+bL+'px;width:'+bW+'px;top:'+bT+'px;background:'+col+';" '+
+                    'onmousedown="startDrag(event,'+task.id+')">' +
+                    escHtml(task.name.slice(0,20))+
+                    '<div class="gantt-bar-resize" onmousedown="event.stopPropagation();startResize(event,'+task.id+')"></div></div>';
+
+                // Deadline marker
+                if(dl){
+                    const dlPx=d2px(pd(dl));
+                    if(dlPx>0&&dlPx<totalW)
+                        bH+='<div class="gantt-deadline" style="left:'+dlPx+'px;top:'+bT+'px;"></div>';
+                }
             }
-            gridHtml += '</div>';
-
-            // Bar
-            const taskStart = parseDate(task._start);
-            const taskEnd = parseDate(task._end);
-            const barStartDay = diffDays(startDate, taskStart);
-            const barDuration = Math.max(1, diffDays(taskStart, taskEnd) + 1);
-            const barLeft = barStartDay * cellWidth;
-            const barWidth = barDuration * cellWidth - 4;
-            const barTop = rowIndex * 36 + (groupBy !== 'none' ? 0 : 0); // rows are consistent height
-
-            if (barStartDay < totalDays && barStartDay + barDuration > 0) {
-                barsHtml += '<div class="gantt-bar" ' +
-                    'data-task-id="' + task.id + '" ' +
-                    'data-row="' + rowIndex + '" ' +
-                    'style="left:' + barLeft + 'px;width:' + barWidth + 'px;top:' + (rowIndex * 36 + 48 + 7) + 'px;' +
-                    'background:' + scoreColor + ';"' +
-                    'onmousedown="startDrag(event, ' + task.id + ')"' +
-                    'onclick="event.stopPropagation();openTaskPanel(' + task.id + ')">' +
-                    escHtml(task.name.slice(0, 20)) +
-                    '<div class="gantt-bar-resize" onmousedown="event.stopPropagation();startResize(event, ' + task.id + ')"></div>' +
-                    '</div>';
-            }
-
-            rowIndex++;
+            ri++;
         });
     });
 
     // Today line
-    const todayOffset = diffDays(startDate, today) * cellWidth + cellWidth / 2;
-    barsHtml += '<div class="today-line" style="left:' + todayOffset + 'px;"></div>';
+    const today=new Date();today.setHours(0,0,0,0);
+    const tPx=d2px(today);
+    bH+='<div class="today-line" style="left:'+tPx+'px;"></div>';
 
-    document.getElementById('ganttLabels').innerHTML = labelsHtml;
-    document.getElementById('ganttTimeline').innerHTML =
-        '<div class="gantt-timeline-inner" style="width:' + totalWidth + 'px;">' +
-        '<div class="gantt-dates-header">' + datesHtml + '</div>' +
-        gridHtml + barsHtml + '</div>';
+    document.getElementById('ganttLabels').innerHTML='<div class="gantt-labels-inner">'+lH+'</div>';
+    document.getElementById('ganttTimeline').innerHTML=
+        '<div class="gantt-tl-inner" style="width:'+totalW+'px;">'+
+        '<div class="gantt-dates">'+dH+'</div>'+gH+bH+'</div>';
 
-    // Sync vertical scroll
-    const labels = document.getElementById('ganttLabels');
-    const timeline = document.getElementById('ganttTimeline');
-    labels.onscroll = () => { timeline.scrollTop = labels.scrollTop; };
-    timeline.onscroll = () => { labels.scrollTop = timeline.scrollTop; };
+    // Scroll sync — timeline scrolls, labels follow vertically
+    const tl=document.getElementById('ganttTimeline');
+    const lb=document.getElementById('ganttLabels');
+    tl.addEventListener('scroll', function(){
+        lb.querySelector('.gantt-labels-inner').style.transform='translateY(-'+tl.scrollTop+'px)';
+    });
 
     // Scroll to today
-    const scrollTarget = todayOffset - timeline.clientWidth / 3;
-    timeline.scrollLeft = Math.max(0, scrollTarget);
+    tl.scrollLeft=Math.max(0,tPx-tl.clientWidth/3);
 }
 
-// ---- Drag to move (change start date) ----
-let dragState = null;
+// ---- Drag ----
+let ds=null, didDrag=false;
 
-function startDrag(e, taskId) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const bar = e.currentTarget;
-    dragState = {
-        taskId: taskId,
-        bar: bar,
-        startX: e.clientX,
-        origLeft: parseInt(bar.style.left),
-        origWidth: parseInt(bar.style.width),
-        mode: 'move',
-    };
-    bar.classList.add('dragging');
-    document.addEventListener('mousemove', onDrag);
-    document.addEventListener('mouseup', endDrag);
+function startDrag(e,tid){
+    if(e.button!==0)return;e.preventDefault();didDrag=false;
+    const b=e.currentTarget;
+    const minDur=parseInt(b.dataset.minDur)||1;
+    ds={tid,b,sx:e.clientX,oL:parseInt(b.style.left),oW:parseInt(b.style.width),mode:'move',dl:b.dataset.deadline,minDur};
+    b.classList.add('dragging');
+    document.addEventListener('mousemove',onDrag);document.addEventListener('mouseup',endDrag);
 }
 
-function startResize(e, taskId) {
-    e.preventDefault();
-    const bar = e.currentTarget.parentElement;
-    dragState = {
-        taskId: taskId,
-        bar: bar,
-        startX: e.clientX,
-        origLeft: parseInt(bar.style.left),
-        origWidth: parseInt(bar.style.width),
-        mode: 'resize',
-    };
-    bar.classList.add('dragging');
-    document.addEventListener('mousemove', onDrag);
-    document.addEventListener('mouseup', endDrag);
+function startResize(e,tid){
+    e.preventDefault();didDrag=false;
+    const b=e.currentTarget.parentElement;
+    const minDur=parseInt(b.dataset.minDur)||1;
+    ds={tid,b,sx:e.clientX,oL:parseInt(b.style.left),oW:parseInt(b.style.width),mode:'resize',dl:b.dataset.deadline,minDur};
+    b.classList.add('dragging');
+    document.addEventListener('mousemove',onDrag);document.addEventListener('mouseup',endDrag);
 }
 
-function onDrag(e) {
-    if (!dragState) return;
-    const dx = e.clientX - dragState.startX;
-    const cellWidth = 36;
-
-    if (dragState.mode === 'move') {
-        const snappedDx = Math.round(dx / cellWidth) * cellWidth;
-        dragState.bar.style.left = (dragState.origLeft + snappedDx) + 'px';
+function onDrag(e){
+    if(!ds)return;
+    const dx=e.clientX-ds.sx;
+    if(Math.abs(dx)>3)didDrag=true;
+    const snap=Math.round(dx/CW)*CW;
+    if(ds.mode==='move'){
+        let newL=ds.oL+snap;
+        // Enforce deadline: bar end can't go past deadline
+        if(ds.dl){
+            const dlPx=d2px(pd(ds.dl));
+            if(newL+ds.oW>dlPx) newL=dlPx-ds.oW;
+        }
+        ds.b.style.left=newL+'px';
     } else {
-        const snappedDx = Math.round(dx / cellWidth) * cellWidth;
-        const newWidth = Math.max(cellWidth - 4, dragState.origWidth + snappedDx);
-        dragState.bar.style.width = newWidth + 'px';
+        // Resize: enforce minimum duration from effort
+        const minW=d2px(ad(pd(fd(px2d(ds.oL))),ds.minDur))-ds.oL;
+        let newW=Math.max(minW, ds.oW+snap);
+        // Enforce deadline
+        if(ds.dl){
+            const dlPx=d2px(pd(ds.dl));
+            const maxW=dlPx-ds.oL;
+            if(newW>maxW) newW=maxW;
+        }
+        ds.b.style.width=newW+'px';
     }
 }
 
-function endDrag(e) {
-    if (!dragState) return;
-    document.removeEventListener('mousemove', onDrag);
-    document.removeEventListener('mouseup', endDrag);
+function endDrag(e){
+    if(!ds)return;
+    document.removeEventListener('mousemove',onDrag);document.removeEventListener('mouseup',endDrag);
+    ds.b.classList.remove('dragging');
+    if(!didDrag){openPanel(ds.tid);ds=null;return;}
 
-    const bar = dragState.bar;
-    bar.classList.remove('dragging');
+    const nL=parseInt(ds.b.style.left);
+    const nW=parseInt(ds.b.style.width);
+    const newStart=fd(px2d(nL));
+    const newEnd=fd(px2d(nL+nW));
+    const t=taskMap[ds.tid];
+    if(t){t._start=newStart;t._end=newEnd;}
 
-    const cellWidth = 36;
-    const days = parseInt(document.getElementById('zoomLevel').value);
-    const today = new Date(); today.setHours(0,0,0,0);
-    const startDate = addDays(today, -3);
+    // Update allTasks too
+    const idx=allTasks.findIndex(x=>x.id===ds.tid);
+    if(idx!==-1){allTasks[idx]._start=newStart;allTasks[idx]._end=newEnd;}
 
-    const newLeft = parseInt(bar.style.left);
-    const newWidth = parseInt(bar.style.width);
+    fetch('/api/task/'+ds.tid+'/dates',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({start:newStart,end:newEnd})}).catch(err=>console.error(err));
+    ds=null;
+}
 
-    const startDay = Math.round(newLeft / cellWidth);
-    const duration = Math.round((newWidth + 4) / cellWidth);
+// Override onTaskUpdated for gantt page to also update allTasks
+const _origOnTaskUpdated = onTaskUpdated;
+onTaskUpdated = function(task) {
+    const idx = allTasks.findIndex(t => t.id === task.id);
+    if (idx !== -1) {
+        const old = allTasks[idx];
+        // Preserve gantt fields unless changed
+        task._assignee = old._assignee;
+        task._assignee_id = old._assignee_id;
+        task._start = old._start;
+        task._end = old._end;
+        task._deadline = old._deadline;
 
-    const newStart = formatDateShort(addDays(startDate, startDay));
-    const newEnd = formatDateShort(addDays(startDate, startDay + duration - 1));
+        // Update min duration if effort changed
+        const effortMap = {'<10 Hrs':1, '10-40 Hrs':5, '41-100 Hrs':12, '>100 Hrs':25};
+        const newEffort = task.x_studio_level_of_effort;
+        task._min_duration = effortMap[newEffort] || old._min_duration || 1;
 
-    const task = taskMap[dragState.taskId];
-    if (task) {
-        task._start = newStart;
-        task._end = newEnd;
+        // If start date changed via panel
+        if (task.planned_date_begin) task._start = task.planned_date_begin.slice(0,10);
+        // If end date changed via panel
+        if (task.date_end) task._end = task.date_end.slice(0,10);
+        // If deadline changed
+        if (task.date_deadline) task._deadline = task.date_deadline.slice(0,10);
+        else if (task.date_deadline === false) task._deadline = null;
+
+        // Ensure end is at least start + min_duration
+        const s = pd(task._start), minEnd = ad(s, task._min_duration);
+        if (pd(task._end) < minEnd) task._end = fd(minEnd);
+
+        // Update assignee
+        if (task.user_ids && task.user_ids.length > 0) {
+            task._assignee_id = task.user_ids[0];
+        }
+
+        allTasks[idx] = Object.assign(old, task);
     }
+    taskMap[task.id] = Object.assign(taskMap[task.id] || {}, task);
+    rebuildGantt();
+};
 
-    // Push to Odoo
-    fetch('/api/task/' + dragState.taskId + '/dates', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({start: newStart, end: newEnd}),
-    }).catch(err => console.error('Failed to update dates:', err));
-
-    dragState = null;
-}
-
-// ---- Panel (simplified for Gantt) ----
-function openTaskPanel(taskId) {
-    document.getElementById('panelTitle').textContent = '#' + taskId;
-    document.getElementById('panelScore').innerHTML = '';
-    document.getElementById('panelBody').innerHTML =
-        '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
-    document.getElementById('panelOverlay').classList.add('open');
-    document.getElementById('detailPanel').classList.add('open');
-
-    fetch('/api/task/' + taskId)
-        .then(r => r.json())
-        .then(data => {
-            const task = data.task;
-            let scoreClass = 'score-low';
-            if (task._score < 10) scoreClass = 'score-critical';
-            else if (task._score < 20) scoreClass = 'score-high';
-            else if (task._score < 30) scoreClass = 'score-medium';
-
-            document.getElementById('panelScore').innerHTML =
-                '<span class="score ' + scoreClass + '">' + task._score + '</span>' +
-                '<span style="color:#64748b;font-size:0.85rem;">Priority Score</span>';
-
-            let html = '<div class="panel-field">' +
-                '<div class="panel-field-label">Title</div>' +
-                '<div class="panel-field-value">' + escHtml(task.name) + '</div></div>';
-
-            html += '<div class="panel-grid">';
-            const fields = [
-                ['Customer', task._customer || '—'],
-                ['Status', task._stage || '—'],
-                ['Start', task._start || '—'],
-                ['End', task._end || '—'],
-                ['Assignee', task._assignee || '—'],
-                ['Issue Type', task.x_studio_issue_type || '—'],
-            ];
-            fields.forEach(([l, v]) => {
-                html += '<div class="panel-field"><div class="panel-field-label">' + l + '</div>' +
-                    '<div class="panel-field-value">' + escHtml(String(v)) + '</div></div>';
-            });
-            html += '</div>';
-
-            // Messages
-            if (data.messages && data.messages.length > 0) {
-                html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-                    '<div class="panel-field-label" style="margin-bottom:0.75rem;">Conversation (' + data.messages.length + ')</div>' +
-                    '<div class="conversation-list">';
-                data.messages.forEach(msg => {
-                    const author = msg._author || 'System';
-                    const msgDate = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
-                    html += '<div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid #f1f5f9;">' +
-                        '<div style="display:flex;justify-content:space-between;margin-bottom:0.35rem;">' +
-                        '<span style="font-weight:600;font-size:0.8rem;">💬 ' + escHtml(author) + '</span>' +
-                        '<span style="font-size:0.7rem;color:#94a3b8;">' + escHtml(msgDate) + '</span></div>' +
-                        '<div style="font-size:0.8rem;color:#475569;line-height:1.5;">' + msg.body + '</div></div>';
-                });
-                html += '</div></div>';
-            }
-
-            document.getElementById('panelBody').innerHTML = html;
-        });
-}
-
-function closePanel() {
-    document.getElementById('panelOverlay').classList.remove('open');
-    document.getElementById('detailPanel').classList.remove('open');
-}
-
-function escHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-}
-
-function escAttr(s) {
-    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
-
-// Initial build
 rebuildGantt();
 </script>
 {% endblock %}

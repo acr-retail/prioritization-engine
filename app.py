@@ -3,9 +3,13 @@ ACR Prioritization Engine — Standalone Web App
 Talks to Odoo via JSON-RPC. Auth via Odoo API keys.
 """
 import json
+import logging
 import xmlrpc.client
 from datetime import date
 from pathlib import Path
+
+from collections import defaultdict
+from datetime import datetime as dt
 
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -23,6 +27,10 @@ app = FastAPI(title="ACR Prioritization Engine")
 app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "acr-priority-dev-secret-change-in-prod"))
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+# Active user presence: login → last_seen timestamp
+active_users: dict[str, float] = {}
+PRESENCE_TIMEOUT = 120  # seconds
 
 ODOO_URL = os.environ.get("ODOO_URL", "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com")
 ODOO_DB = os.environ.get("ODOO_DB", "odoo-ps-psus-all-about-technology-sandbox-30173849")
@@ -150,37 +158,77 @@ def compute_age_bracket(create_date_str: str) -> str:
     return ">90"
 
 
-def get_field_display(task: dict, field_name: str, field_type: str) -> str:
+# Cache for selection field key→label mappings
+_selection_labels_cache: dict | None = None
+
+
+def get_selection_labels(uid: int, api_key: str) -> dict:
+    """Load selection field key→label mappings from Odoo. Cached per process."""
+    global _selection_labels_cache
+    if _selection_labels_cache is not None:
+        return _selection_labels_cache
+
+    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+    field_defs = models_proxy.execute_kw(
+        ODOO_DB, uid, api_key,
+        "project.task", "fields_get",
+        [["x_studio_issue_type", "x_studio_level_of_effort",
+          "x_studio_related_field_gd_1jnftb4gl"]],
+        {"attributes": ["selection"]},
+    )
+
+    result = {}
+    for fname, fdef in field_defs.items():
+        result[fname] = {key: label for key, label in fdef.get("selection", [])}
+
+    _selection_labels_cache = result
+    return result
+
+
+def get_field_display(task: dict, field_name: str, field_type: str,
+                      sel_labels: dict = None) -> str:
     """Extract the display value from an Odoo task record."""
     if field_type == "computed":
         return compute_age_bracket(task.get("create_date", ""))
 
     raw = task.get(field_name)
+
+    # Boolean fields: False is a valid value meaning "No"
+    if field_type == "boolean":
+        if raw is None:
+            return ""
+        return "True" if raw else "False"
+
+    # For non-boolean fields, False/None means unset
     if raw is False or raw is None:
         return ""
-
-    if field_type == "boolean":
-        return "True" if raw else "False"
 
     if field_type == "many2one" and isinstance(raw, (list, tuple)):
         return raw[1] if len(raw) > 1 else str(raw[0])
 
+    if field_type == "selection" and sel_labels:
+        # Convert selection key to display label for weight matching
+        field_map = sel_labels.get(field_name, {})
+        if raw in field_map:
+            return field_map[raw]
+
     return str(raw) if raw else ""
 
 
-def score_task(task: dict, weight_map: dict) -> int:
+def score_task(task: dict, weight_map: dict, sel_labels: dict = None) -> int:
     score = 0
     for field_name, config in weight_map.items():
-        display_val = get_field_display(task, field_name, config["field_type"])
+        display_val = get_field_display(task, field_name, config["field_type"],
+                                        sel_labels)
         if display_val in config["values"]:
             score += config["values"][display_val]
     return score
 
 
-def enrich_tasks(tasks: list, weight_map: dict) -> list:
+def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list:
     """Add score, age bracket, and friendly field values to each task."""
     for task in tasks:
-        task["_score"] = score_task(task, weight_map)
+        task["_score"] = score_task(task, weight_map, sel_labels)
         task["_age"] = compute_age_bracket(task.get("create_date", ""))
         task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
         task["_customer"] = ""
@@ -262,7 +310,8 @@ async def backlog(request: Request):
     )
 
     weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    tasks = enrich_tasks(tasks, weight_map)
+    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    tasks = enrich_tasks(tasks, weight_map, sel_labels)
 
     # Build JSON-safe version for the detail panel
     task_json = json.dumps(tasks, default=str)
@@ -284,7 +333,7 @@ async def gantt_page(request: Request):
 
     # Pull open tasks with date fields
     gantt_fields = TASK_FIELDS + [
-        "planned_date_begin", "date_deadline", "user_ids",
+        "planned_date_begin", "date_end", "date_deadline", "user_ids",
     ]
     tasks = odoo_search_read(
         creds["uid"], creds["api_key"], "project.task",
@@ -293,7 +342,8 @@ async def gantt_page(request: Request):
     )
 
     weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    tasks = enrich_tasks(tasks, weight_map)
+    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    tasks = enrich_tasks(tasks, weight_map, sel_labels)
 
     # Fetch user names for grouping
     all_user_ids = set()
@@ -323,14 +373,28 @@ async def gantt_page(request: Request):
             t["_assignee"] = "Unassigned"
             t["_assignee_id"] = 0
 
-        # Default dates
+        # Minimum duration from Level of Effort
+        effort = t.get("x_studio_level_of_effort", "")
+        effort_days_map = {"<10 Hrs": 1, "10-40 Hrs": 5, "41-100 Hrs": 12, ">100 Hrs": 25}
+        t["_min_duration"] = effort_days_map.get(effort, 1)
+
+        # Start date
         start = t.get("planned_date_begin")
-        end = t.get("date_deadline")
         t["_start"] = start[:10] if start else today
-        t["_end"] = end[:10] if end else t["_start"]
-        # Ensure end is at least start
-        if t["_end"] < t["_start"]:
-            t["_end"] = t["_start"]
+
+        # End date (defines bar length)
+        end = t.get("date_end")
+        if end:
+            t["_end"] = end[:10]
+        else:
+            # Fall back to start + effort duration
+            from datetime import timedelta
+            start_dt = date.fromisoformat(t["_start"])
+            t["_end"] = (start_dt + timedelta(days=t["_min_duration"])).isoformat()
+
+        # Deadline (hard constraint)
+        deadline = t.get("date_deadline")
+        t["_deadline"] = deadline[:10] if deadline else None
 
     task_json = json.dumps(tasks, default=str)
 
@@ -356,7 +420,7 @@ async def api_update_task_dates(request: Request, task_id: int):
     if data.get("start"):
         values["planned_date_begin"] = data["start"]
     if data.get("end"):
-        values["date_deadline"] = data["end"]
+        values["date_end"] = data["end"]
     if data.get("user_ids") is not None:
         user_list = data["user_ids"]
         if isinstance(user_list, list):
@@ -477,52 +541,103 @@ async def update_task(request: Request, task_id: int):
     data = await request.json()
     values = {}
 
-    # Field mapping: form key → (odoo field, type)
-    field_map = {
+    # Fields that live on project.task directly
+    task_field_map = {
         "name": ("name", "string"),
         "stage_id": ("stage_id", "int"),
-        "x_studio_customer": ("x_studio_customer", "int_or_false"),
-        "x_studio_issue_type": ("x_studio_issue_type", "string_or_false"),
         "x_studio_level_of_effort": ("x_studio_level_of_effort", "string_or_false"),
-        "x_studio_related_field_5vi_1jnfmj9cf": ("x_studio_related_field_5vi_1jnfmj9cf", "bool"),
-        "x_studio_related_field_gd_1jnftb4gl": ("x_studio_related_field_gd_1jnftb4gl", "string_or_false"),
-        "x_studio_related_field_27d_1jnftbs3p": ("x_studio_related_field_27d_1jnftbs3p", "bool"),
         "x_studio_road_map_flag": ("x_studio_road_map_flag", "bool"),
         "priority": ("priority", "string"),
+        "planned_date_begin": ("planned_date_begin", "date_or_false"),
+        "date_end": ("date_end", "date_or_false"),
         "date_deadline": ("date_deadline", "date_or_false"),
         "date_assign": ("date_assign", "date_or_false"),
         "allocated_hours": ("allocated_hours", "float"),
+        "user_id": ("user_ids", "many2many_single"),
     }
 
-    for key, (odoo_field, ftype) in field_map.items():
+    # Fields that live on the linked helpdesk.ticket (related fields)
+    ticket_field_map = {
+        "x_studio_customer": ("partner_id", "int_or_false"),
+        "x_studio_issue_type": ("x_studio_customer_impact", "string_or_false"),
+        "x_studio_related_field_5vi_1jnfmj9cf": ("x_studio_escalated", "bool"),
+        "x_studio_related_field_gd_1jnftb4gl": ("x_studio_customer_funded", "string_or_false"),
+        "x_studio_related_field_27d_1jnftbs3p": ("x_studio_paid_prioritization", "bool"),
+    }
+
+    def convert_value(val, ftype):
+        if val == "" and ftype not in ("bool",):
+            return None  # skip
+        if ftype == "bool":
+            if isinstance(val, str):
+                return val.lower() in ("true", "1", "yes")
+            return bool(val)
+        elif ftype in ("int", "int_or_false"):
+            return int(val) if val and str(val).strip() else False
+        elif ftype == "float":
+            return float(val) if val else 0.0
+        elif ftype == "date_or_false":
+            return val if val else False
+        elif ftype == "string_or_false":
+            return val if val else False
+        elif ftype == "many2many_single":
+            return [(6, 0, [int(val)])] if val else [(5, 0, 0)]
+        return val
+
+    # Process task fields
+    task_values = {}
+    for key, (odoo_field, ftype) in task_field_map.items():
         if key not in data:
             continue
-        val = data[key]
+        result = convert_value(data[key], ftype)
+        if result is not None:
+            task_values[odoo_field] = result
 
-        if ftype == "bool":
-            values[odoo_field] = bool(val)
-        elif ftype == "int":
-            values[odoo_field] = int(val) if val else False
-        elif ftype == "int_or_false":
-            values[odoo_field] = int(val) if val else False
-        elif ftype == "float":
-            values[odoo_field] = float(val) if val else 0.0
-        elif ftype == "date_or_false":
-            values[odoo_field] = val if val else False
-        elif ftype == "string_or_false":
-            values[odoo_field] = val if val else False
+    # Process ticket fields
+    ticket_values = {}
+    for key, (odoo_field, ftype) in ticket_field_map.items():
+        if key not in data:
+            continue
+        result = convert_value(data[key], ftype)
+        if result is not None:
+            ticket_values[odoo_field] = result
+
+    updated = 0
+
+    # Write task fields
+    if task_values:
+        try:
+            odoo_write(creds["uid"], creds["api_key"], "project.task", [task_id], task_values)
+            updated += len(task_values)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Task update failed: {e}")
+
+    # Write ticket fields (if there's a linked ticket)
+    if ticket_values:
+        # Look up the linked helpdesk ticket
+        task_rec = odoo_search_read(
+            creds["uid"], creds["api_key"], "project.task",
+            [("id", "=", task_id)],
+            ["helpdesk_ticket_id"],
+            limit=1,
+        )
+        ticket_id_link = None
+        if task_rec and task_rec[0].get("helpdesk_ticket_id"):
+            ht = task_rec[0]["helpdesk_ticket_id"]
+            ticket_id_link = ht[0] if isinstance(ht, (list, tuple)) else ht
+
+        if ticket_id_link:
+            try:
+                odoo_write(creds["uid"], creds["api_key"], "helpdesk.ticket",
+                           [ticket_id_link], ticket_values)
+                updated += len(ticket_values)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Ticket update failed: {e}")
         else:
-            values[odoo_field] = val
+            logging.warning(f"Task {task_id} has no linked helpdesk ticket — "
+                            f"cannot update ticket fields: {list(ticket_values.keys())}")
 
-    if not values:
-        return {"ok": True, "updated": 0}
-
-    try:
-        odoo_write(creds["uid"], creds["api_key"], "project.task", [task_id], values)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return {"ok": True, "updated": len(values)}
+    return {"ok": True, "updated": updated}
 
 
 @app.get("/api/task/{task_id}")
@@ -534,7 +649,8 @@ async def api_task_detail(request: Request, task_id: int):
 
     # Fetch full task record
     detail_fields = TASK_FIELDS + [
-        "description", "date_deadline", "date_assign",
+        "description", "date_deadline", "date_end", "date_assign",
+        "planned_date_begin",
         "user_ids", "tag_ids", "priority",
         "partner_id", "partner_name", "partner_phone", "email_from",
         "allocated_hours", "effective_hours", "remaining_hours",
@@ -598,7 +714,8 @@ async def api_task_detail(request: Request, task_id: int):
 
     # Compute score
     weight_map = load_weight_map(creds["uid"], creds["api_key"])
-    task["_score"] = score_task(task, weight_map)
+    sel_labels = get_selection_labels(creds["uid"], creds["api_key"])
+    task["_score"] = score_task(task, weight_map, sel_labels)
     task["_age"] = compute_age_bracket(task.get("create_date", ""))
     task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
     task["_customer"] = ""
@@ -757,7 +874,8 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
     if tasks:
         task_data = tasks[0]
         weight_map = load_weight_map(creds["uid"], creds["api_key"])
-        task_data["_score"] = score_task(task_data, weight_map)
+        sel_labels_lookup = get_selection_labels(creds["uid"], creds["api_key"])
+        task_data["_score"] = score_task(task_data, weight_map, sel_labels_lookup)
         task_data["_age"] = compute_age_bracket(task_data.get("create_date", ""))
 
     # Fetch chatter messages from the helpdesk ticket
@@ -787,6 +905,28 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
         "task": task_data,
         "messages": messages,
     }
+
+
+# ---------------------------------------------------------------------------
+# Presence
+# ---------------------------------------------------------------------------
+@app.post("/api/presence/heartbeat")
+async def presence_heartbeat(request: Request):
+    creds = get_session_creds(request)
+    if not creds:
+        return {"ok": False}
+    import time
+    active_users[creds["login"]] = time.time()
+    return {"ok": True}
+
+
+@app.get("/api/presence/online")
+async def presence_online(request: Request):
+    import time
+    now = time.time()
+    online = [login for login, ts in active_users.items()
+              if now - ts < PRESENCE_TIMEOUT]
+    return {"users": online}
 
 
 # ---------------------------------------------------------------------------

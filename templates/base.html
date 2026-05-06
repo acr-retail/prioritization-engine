@@ -375,6 +375,25 @@
 
         .panel-input:hover { border-color: #cbd5e1; }
 
+        .panel-tooltip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: #64748b;
+            font-size: 0.55rem;
+            font-weight: 700;
+            cursor: help;
+            position: relative;
+            top: -1px;
+            margin-left: 3px;
+        }
+
+        .panel-tooltip:hover { background: #cbd5e1; color: #334155; }
+
         /* Loading spinner */
         .spinner {
             width: 32px;
@@ -463,7 +482,10 @@
 </head>
 <body>
     <nav>
-        <a href="/backlog" class="brand">ACR <span>Prioritization Engine</span></a>
+        <div style="display:flex;align-items:center;gap:1rem;">
+            <a href="/backlog" class="brand">ACR <span>Prioritization Engine</span></a>
+            {% if login %}<div id="presenceIndicator" style="display:flex;align-items:center;"></div>{% endif %}
+        </div>
         <div class="nav-links">
             {% if login %}
             <a href="/backlog" class="{% if active_page == 'backlog' %}active{% endif %}">Backlog</a>
@@ -477,6 +499,19 @@
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+    {% if login %}
+    <!-- Shared panel HTML -->
+    <div class="panel-overlay" id="panelOverlay" onclick="closePanel()"></div>
+    <div class="panel" id="detailPanel">
+        <div class="panel-header">
+            <h2 id="panelTitle">Task Details</h2>
+            <button class="panel-close" onclick="closePanel()">✕</button>
+        </div>
+        <div class="panel-score" id="panelScore"></div>
+        <div class="panel-body" id="panelBody"></div>
+    </div>
+    <script src="/static/panel.js"></script>
+    {% endif %}
     {% block scripts %}{% endblock %}
 </body>
 </html>
