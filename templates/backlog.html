@@ -73,47 +73,63 @@ if (!window.location.search.includes('view=')) {
 
 <div id="backlogHelp" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem 1.5rem;margin-bottom:1rem;font-size:0.8rem;color:#374151;line-height:1.7;position:relative;">
     <button onclick="toggleBacklogHelp()" style="position:absolute;top:0.75rem;right:1rem;background:none;border:none;font-size:1.1rem;cursor:pointer;color:#94a3b8;">✕</button>
-    <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.75rem;">How the Prioritized Backlog Works</div>
+    <div style="font-weight:700;font-size:0.9rem;margin-bottom:0.75rem;">How the Backlog Works</div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem 2rem;">
         <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Projects vs Helpdesk</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Projects</strong> — shows development tasks organized by project. Toggle between <strong>Grouped</strong> (tasks nested under collapsible project headers) and <strong>Prioritized</strong> (flat list sorted by score)</li>
+                <li><strong>Helpdesk</strong> — shows open helpdesk tickets (customer-submitted issues)</li>
+                <li>Your selection is remembered between visits</li>
+                <li>Click a <strong>project header</strong> in Grouped view to see project details, manager, and task list</li>
+            </ul>
+        </div>
+        <div>
             <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Priority Scoring</div>
             <ul style="margin:0;padding-left:1.2rem;">
-                <li>Every task gets a <strong>priority score</strong> based on its attributes (customer, issue type, escalation, etc.)</li>
-                <li><strong>Lower score = higher priority</strong> — tasks are sorted lowest first</li>
+                <li>Every item gets a <strong>priority score</strong> based on its attributes (customer, issue type, escalation, etc.)</li>
+                <li><strong>Lower score = higher priority</strong> — items are sorted lowest first</li>
                 <li>Scores are calculated using configurable weights on the <strong>Weights</strong> page</li>
                 <li>Negative weights (e.g. paid prioritization, customer funded) push items to the top</li>
-                <li>Score thresholds for Critical/High/Medium/Low are calculated from the actual distribution of all task scores (percentile-based)</li>
+                <li>Click the <strong>Critical/High/Medium/Low</strong> stats to filter to that priority level. Click <strong>Total</strong> to show all</li>
+                <li>Thresholds are percentile-based — they adjust automatically as scores change</li>
             </ul>
         </div>
         <div>
             <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Grooming</div>
             <ul style="margin:0;padding-left:1.2rem;">
                 <li>A task is <strong>"groomed"</strong> when it has <strong>Issue Type</strong>, <strong>Level of Effort</strong>, and <strong>Customer</strong> filled in</li>
-                <li>Ungroomed tasks show a purple <span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.3rem;border-radius:9999px;font-size:0.65rem;font-weight:600;">N missing</span> badge — hover to see which fields are empty</li>
-                <li>Empty fields score <strong>10 points each</strong> (configurable on the Weights page as "Not Set"), pushing ungroomed items toward the bottom</li>
-                <li><strong>Show Ungroomed</strong> filters to only show tasks that need grooming</li>
-                <li><strong>Hide Ungroomed</strong> hides ungroomed tasks so you see only actionable items</li>
+                <li>Ungroomed items show a purple <span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.3rem;border-radius:9999px;font-size:0.65rem;font-weight:600;">N missing</span> badge — hover to see which fields are empty</li>
+                <li>Empty fields score <strong>10 points each</strong> (configurable as "Not Set" on the Weights page), pushing ungroomed items toward the bottom</li>
+                <li><strong>Show Ungroomed</strong> — shows only items missing 2+ fields that need attention</li>
+                <li><strong>Hide Ungroomed</strong> — hides items missing 2+ fields so you see only actionable work</li>
             </ul>
         </div>
         <div>
-            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Editing Tasks</div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Editing & Actions</div>
             <ul style="margin:0;padding-left:1.2rem;">
-                <li><strong>Click a cell</strong> to edit it inline — dropdowns for selections, text input for title</li>
-                <li>Changes save to Odoo automatically and the score recalculates</li>
-                <li><strong>Click the Score or ID</strong> to open the full task editor panel with all fields, description, and conversation</li>
-                <li>The editor panel also lets you post comments directly to the Odoo task</li>
-                <li>Hover the <span class="panel-tooltip" style="display:inline-flex;width:14px;height:14px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:0.55rem;font-weight:700;align-items:center;justify-content:center;">?</span> icons in the editor to see what each field affects</li>
+                <li><strong>Click any row</strong> to open the detail panel with all editable fields, description, and conversation history</li>
+                <li>The panel shows different fields depending on whether the task has a linked helpdesk ticket</li>
+                <li>Post comments directly to Odoo from the panel</li>
+                <li>Every panel includes an <strong>"Open in Odoo →"</strong> link to view/edit the original record</li>
+                <li>Hover the <span class="panel-tooltip" style="display:inline-flex;width:14px;height:14px;border-radius:50%;background:#e2e8f0;color:#64748b;font-size:0.55rem;font-weight:700;align-items:center;justify-content:center;">?</span> icons to see what each field affects</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Filtering & Sorting</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Sort</strong> — click any column header to sort ascending/descending</li>
+                <li><strong>Filter</strong> — use the dropdown row below headers to filter by any column value (Customer, Assignee, Status, etc.)</li>
+                <li><strong>Assignee filter</strong> — quickly see one person's workload</li>
             </ul>
         </div>
         <div>
             <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Other Features</div>
             <ul style="margin:0;padding-left:1.2rem;">
-                <li><strong>Sort</strong> — click any column header to sort ascending/descending</li>
-                <li><strong>Filter</strong> — use the dropdown row below headers to filter by any column value</li>
-                <li><strong>Bulk Edit</strong> — enter bulk mode, click rows to select, then change status or assignee for all selected at once</li>
-                <li><strong>View Closed Ticket</strong> — look up a closed ticket by its ID number, view its history, and reopen it if needed</li>
-                <li><strong>Refresh</strong> — reload all task data from Odoo</li>
+                <li><strong>Bulk Edit</strong> — click Bulk Edit, select rows by clicking, then change status or assignee for all selected at once</li>
+                <li><strong>View Closed Ticket</strong> — look up any ticket by its ID number, view its full history, reopen it if needed</li>
+                <li><strong>Refresh</strong> — reload all data from Odoo (data is cached for 15 minutes for fast page switching)</li>
             </ul>
         </div>
     </div>

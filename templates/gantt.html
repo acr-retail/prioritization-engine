@@ -75,17 +75,36 @@
             <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Constraints</div>
             <ul style="margin:0;padding-left:1.2rem;">
                 <li><strong>Level of Effort</strong> sets the minimum bar duration — the bar cannot be shorter than this</li>
-                <li><strong>Deadline</strong> (red flag) is a hard limit — the bar cannot extend past this date</li>
+                <li><strong>Deadline</strong> (red flag <span style="color:#dc2626;">⚑</span>) is a hard limit — the bar cannot extend past this date</li>
                 <li>Effort mapping: &lt;10 Hrs = 1 day, 10-40 Hrs = 5 days, 41-100 Hrs = 12 days, &gt;100 Hrs = 25 days</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Grouping & Filtering</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Group by</strong> — organize tasks by Project, Assignee, Customer, or Status. Default is Project. Your selection is remembered.</li>
+                <li><strong>Click a group header</strong> — for Projects, opens the project detail panel. For other groupings, filters to that value.</li>
+                <li>Child tasks are <strong>indented</strong> under their parent task when grouped by Project</li>
+                <li>Use the <strong>filter dropdowns</strong> (Project, Customer, Assignee, Status) to narrow the view</li>
+            </ul>
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Zoom Levels</div>
+            <ul style="margin:0;padding-left:1.2rem;">
+                <li><strong>Daily</strong> — one column per day, 3-month range</li>
+                <li><strong>Weekly</strong> — one column per week, ~3-month range</li>
+                <li><strong>Monthly</strong> — one column per month, ~14-month range</li>
+                <li><strong>Quarterly</strong> — one column per quarter, ~2-year range</li>
             </ul>
         </div>
         <div>
             <div style="font-weight:600;color:#1a1a1a;margin-bottom:0.25rem;">Interactions</div>
             <ul style="margin:0;padding-left:1.2rem;">
                 <li><strong>Drag a bar</strong> horizontally to change the Start and End dates together</li>
-                <li><strong>Drag the right edge</strong> to resize (change End Date only)</li>
-                <li><strong>Click a bar</strong> to open the task editor panel</li>
+                <li><strong>Drag the right edge</strong> to resize (change End Date only, respects minimum effort duration)</li>
+                <li><strong>Click a bar or task name</strong> to open the task editor panel with all fields and conversation</li>
                 <li>All changes save to Odoo automatically</li>
+                <li>Every panel includes an <strong>"Open in Odoo →"</strong> link</li>
             </ul>
         </div>
         <div>
@@ -93,8 +112,8 @@
             <ul style="margin:0;padding-left:1.2rem;">
                 <li><span style="display:inline-block;width:12px;height:12px;background:#93b5e6;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>Blue</strong> — assigned to a developer</li>
                 <li><span style="display:inline-block;width:12px;height:12px;background:#e57373;border-radius:2px;vertical-align:middle;margin-right:4px;"></span> <strong>Red</strong> — unassigned</li>
-                <li><span style="display:inline-block;width:2px;height:12px;background:#dc2626;vertical-align:middle;margin-right:4px;"></span> <strong>Red line</strong> — today</li>
-                <li><span style="color:#dc2626;margin-right:4px;">⚑</span> <strong>Red flag</strong> — deadline marker</li>
+                <li><span style="display:inline-block;width:2px;height:12px;background:#dc2626;vertical-align:middle;margin-right:4px;"></span> <strong>Red vertical line</strong> — today</li>
+                <li><span style="color:#dc2626;margin-right:4px;">⚑</span> <strong>Red flag</strong> — deadline marker (bar cannot extend past this)</li>
             </ul>
         </div>
     </div>
