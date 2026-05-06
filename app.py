@@ -276,6 +276,105 @@ async def backlog(request: Request):
     })
 
 
+@app.get("/gantt", response_class=HTMLResponse)
+async def gantt_page(request: Request):
+    creds = get_session_creds(request)
+    if not creds:
+        return RedirectResponse("/login", status_code=303)
+
+    # Pull open tasks with date fields
+    gantt_fields = TASK_FIELDS + [
+        "planned_date_begin", "date_deadline", "user_ids",
+    ]
+    tasks = odoo_search_read(
+        creds["uid"], creds["api_key"], "project.task",
+        [("stage_id.name", "not in", list(EXCLUDED_STAGES))],
+        gantt_fields,
+    )
+
+    weight_map = load_weight_map(creds["uid"], creds["api_key"])
+    tasks = enrich_tasks(tasks, weight_map)
+
+    # Fetch user names for grouping
+    all_user_ids = set()
+    for t in tasks:
+        uids = t.get("user_ids", [])
+        if isinstance(uids, list):
+            all_user_ids.update(uids)
+
+    user_names = {}
+    if all_user_ids:
+        users = odoo_search_read(
+            creds["uid"], creds["api_key"], "res.users",
+            [("id", "in", list(all_user_ids))],
+            ["name"],
+        )
+        for u in users:
+            user_names[u["id"]] = u["name"]
+
+    # Enrich with user name and default dates
+    today = date.today().isoformat()
+    for t in tasks:
+        uids = t.get("user_ids", [])
+        if uids and isinstance(uids, list) and uids[0] in user_names:
+            t["_assignee"] = user_names[uids[0]]
+            t["_assignee_id"] = uids[0]
+        else:
+            t["_assignee"] = "Unassigned"
+            t["_assignee_id"] = 0
+
+        # Default dates
+        start = t.get("planned_date_begin")
+        end = t.get("date_deadline")
+        t["_start"] = start[:10] if start else today
+        t["_end"] = end[:10] if end else t["_start"]
+        # Ensure end is at least start
+        if t["_end"] < t["_start"]:
+            t["_end"] = t["_start"]
+
+    task_json = json.dumps(tasks, default=str)
+
+    return templates.TemplateResponse(request, "gantt.html", {
+        "tasks": tasks,
+        "task_json": task_json,
+        "login": creds["login"],
+        "task_count": len(tasks),
+        "user_names": user_names,
+    })
+
+
+@app.post("/api/task/{task_id}/dates")
+async def api_update_task_dates(request: Request, task_id: int):
+    """Update a task's start and end dates."""
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    values = {}
+
+    if data.get("start"):
+        values["planned_date_begin"] = data["start"]
+    if data.get("end"):
+        values["date_deadline"] = data["end"]
+    if data.get("user_ids") is not None:
+        user_list = data["user_ids"]
+        if isinstance(user_list, list):
+            values["user_ids"] = [(6, 0, [int(u) for u in user_list])]
+        elif user_list:
+            values["user_ids"] = [(6, 0, [int(user_list)])]
+
+    if not values:
+        return {"ok": True}
+
+    try:
+        odoo_write(creds["uid"], creds["api_key"], "project.task", [task_id], values)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True}
+
+
 @app.get("/config", response_class=HTMLResponse)
 async def config_page(request: Request):
     creds = get_session_creds(request)

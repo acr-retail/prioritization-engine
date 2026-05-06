@@ -467,6 +467,7 @@
         <div class="nav-links">
             {% if login %}
             <a href="/backlog" class="{% if active_page == 'backlog' %}active{% endif %}">Backlog</a>
+            <a href="/gantt" class="{% if active_page == 'gantt' %}active{% endif %}">Gantt</a>
             <a href="/config" class="{% if active_page == 'config' %}active{% endif %}">Weights</a>
             <span class="user">{{ login }}</span>
             <a href="/logout">Logout</a>
