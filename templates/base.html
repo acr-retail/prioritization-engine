@@ -166,6 +166,68 @@
             max-width: 100%;
         }
 
+        /* Visual indicator when a filter is non-default */
+        .filter-row select.active-filter {
+            background: #fef3c7;
+            border-color: #f59e0b;
+            color: #92400e;
+            font-weight: 700;
+        }
+
+        /* Banner that appears above the table whenever any filter is active */
+        .filter-banner {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.3rem 0.7rem;
+            border-radius: 6px;
+            background: #fef3c7;
+            color: #92400e;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+        .filter-banner button {
+            background: none;
+            border: 1px solid #92400e;
+            color: #92400e;
+            border-radius: 4px;
+            padding: 0.1rem 0.4rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .filter-banner button:hover { background: #92400e; color: #fef3c7; }
+
+        /* Tag chips — used in backlog Tags column and in the panel editor */
+        .tag-chip {
+            display: inline-block;
+            padding: 0.1rem 0.45rem;
+            margin: 0 0.15rem 0.15rem 0;
+            border-radius: 9999px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            background: #ecfeff;
+            color: #155e75;
+            border: 1px solid #a5f3fc;
+            white-space: nowrap;
+        }
+        .tag-chip-removable {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .tag-chip-removable button {
+            background: none;
+            border: none;
+            color: #155e75;
+            cursor: pointer;
+            padding: 0;
+            font-size: 0.8rem;
+            line-height: 1;
+        }
+        .tag-chip-removable button:hover { color: #dc2626; }
+
         /* Buttons */
         .btn {
             display: inline-flex;

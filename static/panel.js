@@ -275,6 +275,11 @@ function renderPanel(task, messages) {
     html += panelReadonly('Time Spent', task.effective_hours ? task.effective_hours.toFixed(1) + 'h' : '—',
         'Actual hours logged via timesheets. Read-only.');
     html += '</div>';
+
+    // Tag editor — chips for current tags + dropdown to add. The hidden
+    // input is what dirty-tracking compares; JS keeps it in sync with
+    // the visible chips.
+    html += renderTagEditor(task);
     html += '<div style="margin-top:1.25rem;display:flex;gap:0.75rem;">' +
         '<button type="submit" class="btn btn-primary" id="panelSaveBtn">Save Changes</button>' +
         '<span id="panelSaveStatus" style="font-size:0.8rem;color:#16a34a;align-self:center;"></span></div>';
@@ -348,6 +353,61 @@ function panelDate(label, name, val, tip) {
 function panelReadonly(label, val, tip) {
     return '<div class="panel-field"><div class="panel-field-label">' + label + tipHtml(tip) + '</div>' +
         '<div class="panel-field-value">' + escHtml(String(val)) + '</div></div>';
+}
+
+// ---- Tag editor ----
+// Renders the current tags as removable chips + an "Add tag" dropdown.
+// A hidden input named `tag_ids` (comma-separated) is the canonical form
+// value that dirty-tracking diffs against.
+function renderTagEditor(task) {
+    const tags = task._tags || [];
+    const currentIds = tags.map(t => String(t.id));
+    let h = '<div class="panel-field" style="margin-top:1rem;">' +
+        '<div class="panel-field-label">Tags' + tipHtml('Categorize this task. Affects backlog filtering.') + '</div>' +
+        '<input type="hidden" name="tag_ids" value="' + escAttr(currentIds.join(',')) + '">' +
+        '<div id="tagChips" style="display:flex;flex-wrap:wrap;gap:0.25rem;margin-bottom:0.5rem;min-height:1.5rem;">';
+    tags.forEach(t => { h += renderTagChipHtml(t.id, t.name); });
+    h += '</div>' +
+        '<select id="tagAddSelect" class="panel-input" onchange="addTagFromSelect()">' +
+        '<option value="">+ Add tag…</option>';
+    (fieldOptions?.tags || []).forEach(t => {
+        h += '<option value="' + t.id + '" data-name="' + escAttr(t.name) + '">' + escHtml(t.name) + '</option>';
+    });
+    h += '</select></div>';
+    return h;
+}
+
+function renderTagChipHtml(tagId, tagName) {
+    return '<span class="tag-chip tag-chip-removable" data-tag-id="' + escAttr(String(tagId)) + '">' +
+        escHtml(tagName) +
+        '<button type="button" onclick="removeTagChip(' + tagId + ')" title="Remove">×</button>' +
+        '</span>';
+}
+
+function addTagFromSelect() {
+    const sel = document.getElementById('tagAddSelect');
+    if (!sel || !sel.value) return;
+    const id = sel.value;
+    const name = sel.options[sel.selectedIndex].dataset.name;
+    const hidden = document.querySelector('#panelForm input[name="tag_ids"]');
+    if (!hidden) return;
+    const current = hidden.value.split(',').filter(Boolean);
+    if (current.includes(id)) { sel.value = ''; return; } // already on
+    current.push(id);
+    hidden.value = current.join(',');
+    document.getElementById('tagChips').insertAdjacentHTML(
+        'beforeend', renderTagChipHtml(id, name)
+    );
+    sel.value = '';
+}
+
+function removeTagChip(tagId) {
+    const hidden = document.querySelector('#panelForm input[name="tag_ids"]');
+    if (!hidden) return;
+    const filtered = hidden.value.split(',').filter(Boolean).filter(x => x !== String(tagId));
+    hidden.value = filtered.join(',');
+    const chip = document.querySelector('#tagChips [data-tag-id="' + tagId + '"]');
+    if (chip) chip.remove();
 }
 
 function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -479,6 +539,16 @@ function updateBacklogRow(task) {
     const row = document.querySelector('tr[data-task-id="' + task.id + '"]');
     if (!row || !row.cells || row.cells.length < 15) return;
     const c = row.cells;
+
+    // 15: Tags (only present on the Projects view — column was added after
+    // Created so existing column indices weren't disturbed)
+    if (c.length > 15) {
+        const tags = task._tags || [];
+        c[15].dataset.tags = tags.map(t => t.name).join(',');
+        c[15].innerHTML = tags.map(t =>
+            '<span class="tag-chip">' + escHtml(t.name) + '</span>'
+        ).join('');
+    }
 
     // 0: Score
     c[0].innerHTML = '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>';

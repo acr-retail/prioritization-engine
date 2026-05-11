@@ -300,6 +300,7 @@ EXCLUDED_STAGES = {"Complete", "Complete_1", "Cancelled"}
 # Fields to pull from project.task
 TASK_FIELDS = [
     "id", "name", "stage_id", "create_date", "user_ids", "project_id",
+    "tag_ids",                                  # project.tags many2many
     "x_studio_customer",
     "x_studio_issue_type",
     "x_studio_level_of_effort",
@@ -548,6 +549,16 @@ def convert_value(val, ftype):
         return _SKIP if is_empty else val
     if ftype == "many2many_single":
         return [(5, 0, 0)] if is_empty else [(6, 0, [int(val)])]
+    if ftype == "many2many_replace":
+        # Accepts a comma-separated list of ids ("1,3,7") or an already-
+        # parsed list. Replaces the full set in one write.
+        if is_empty:
+            return [(5, 0, 0)]
+        if isinstance(val, str):
+            ids = [int(x) for x in val.split(",") if x.strip()]
+        else:
+            ids = [int(x) for x in val if str(x).strip()]
+        return [(6, 0, ids)] if ids else [(5, 0, 0)]
     return val
 
 
@@ -689,6 +700,25 @@ def resolve_user_names(tasks: list, uid: int, api_key: str):
         else:
             t["_assignee"] = "Unassigned"
             t["_assignee_id"] = 0
+
+
+def resolve_tag_names(tasks: list, uid: int, api_key: str):
+    """Add _tags (list of {id,name}) to each task by resolving tag_ids
+    via project.tags. Fetches the full tag catalog (small — 4 tags in
+    practice) once per user and caches it, so a tag freshly assigned
+    via the panel doesn't render as its raw ID until cache TTL."""
+    tag_names = cache_get(uid, "tag_names")
+    if tag_names is None:
+        rows = odoo_search_read(uid, api_key, "project.tags", [], ["name"])
+        tag_names = {r["id"]: r["name"] for r in rows}
+        cache_set(uid, "tag_names", tag_names)
+
+    for t in tasks:
+        ids = t.get("tag_ids", []) or []
+        t["_tags"] = [
+            {"id": tid, "name": tag_names.get(tid, str(tid))}
+            for tid in ids if isinstance(tid, int)
+        ]
 
 
 # Fields required for a task to be considered "groomed"
@@ -871,6 +901,7 @@ async def backlog(request: Request):
         tasks = [dict(t) for t in tasks]
         tasks = enrich_tasks(tasks, weight_map, sel_labels)
         await _odoo(resolve_user_names, tasks, creds["uid"], creds["api_key"])
+        await _odoo(resolve_tag_names, tasks, creds["uid"], creds["api_key"])
         for t in tasks:
             t["_item_type"] = "task"
         items = tasks
@@ -911,6 +942,7 @@ async def gantt_page(request: Request):
     tasks = [dict(t) for t in tasks]
     tasks = enrich_tasks(tasks, weight_map, sel_labels)
     await _odoo(resolve_user_names, tasks, creds["uid"], creds["api_key"])
+    await _odoo(resolve_tag_names, tasks, creds["uid"], creds["api_key"])
 
     # Default dates for gantt
     today = date.today().isoformat()
@@ -1099,10 +1131,18 @@ async def api_options(request: Request):
         [("share", "=", False)], ["name"], 200,
     )
 
+    # Fetch project tags (project.tags many2many on project.task.tag_ids)
+    tags = await _odoo(
+        odoo_search_read,
+        creds["uid"], creds["api_key"], "project.tags",
+        [], ["name"], 100,
+    )
+
     return {
         "stages": [{"id": s["id"], "name": s["name"]} for s in stages],
         "customers": [{"id": c["id"], "name": c["name"]} for c in customers],
         "users": [{"id": u["id"], "name": u["name"]} for u in users],
+        "tags": [{"id": t["id"], "name": t["name"]} for t in tags],
         "issue_types": [
             {"value": s[0], "label": s[1]}
             for s in field_defs.get("x_studio_issue_type", {}).get("selection", [])
@@ -1144,6 +1184,7 @@ async def update_task(request: Request, task_id: int):
         "date_assign": ("date_assign", "date_or_false"),
         "allocated_hours": ("allocated_hours", "float"),
         "user_id": ("user_ids", "many2many_single"),
+        "tag_ids": ("tag_ids", "many2many_replace"),
     }
 
     # Fields that live on the linked helpdesk.ticket (related fields)
@@ -1300,6 +1341,7 @@ async def api_task_detail(request: Request, task_id: int):
     sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
     enriched = enrich_tasks([task], weight_map, sel_labels)
     await _odoo(resolve_user_names, enriched, creds["uid"], creds["api_key"])
+    await _odoo(resolve_tag_names, enriched, creds["uid"], creds["api_key"])
     task = enriched[0]
     task["description"] = sanitize_html(task.get("description"))
 

@@ -37,6 +37,7 @@ _TASKS = [
         "stage_id": [30, "New_1"],
         "create_date": "2026-04-10 14:00:00",
         "user_ids": [],
+        "tag_ids": [],
         "project_id": [75, "Bugs - 2021"],
         "x_studio_customer": False,
         "x_studio_issue_type": False,
@@ -67,6 +68,7 @@ _TASKS = [
         "stage_id": [30, "New_1"],
         "create_date": "2026-04-01 09:00:00",
         "user_ids": [1297],
+        "tag_ids": [1],  # tagged "Bug"
         "project_id": [75, "Bugs - 2021"],
         "x_studio_customer": [9, "Schnuck Markets, Inc."],
         "x_studio_issue_type": "Minor",
@@ -81,7 +83,6 @@ _TASKS = [
         "date_end": False,
         "date_assign": False,
         "planned_date_begin": False,
-        "tag_ids": [],
         "priority": "0",
         "partner_id": False,
         "partner_name": False,
@@ -128,6 +129,13 @@ _STAGES = [
     {"id": 133, "name": "Inbox"},
     {"id": 200, "name": "In Progress"},
     {"id": 999, "name": "Complete"},
+]
+
+_TAGS = [
+    {"id": 1, "name": "Bug"},
+    {"id": 2, "name": "Enhancement"},
+    {"id": 3, "name": "Development Task"},
+    {"id": 4, "name": "Roadmap"},
 ]
 
 _PROJECTS = [
@@ -207,6 +215,7 @@ class FakeOdoo:
         self.partners = {p["id"]: deepcopy(p) for p in _PARTNERS}
         self.stages = {s["id"]: deepcopy(s) for s in _STAGES}
         self.projects = {p["id"]: deepcopy(p) for p in _PROJECTS}
+        self.tags = {t["id"]: deepcopy(t) for t in _TAGS}
         self.messages = list(deepcopy(_MESSAGES))
         self.attrs = list(deepcopy(_PRIORITY_ATTRS))
         self.weights = list(deepcopy(_PRIORITY_WEIGHTS))
@@ -236,6 +245,7 @@ class FakeOdoo:
             "res.partner": list(self.partners.values()),
             "project.task.type": list(self.stages.values()),
             "project.project": list(self.projects.values()),
+            "project.tags": list(self.tags.values()),
             "mail.message": self.messages,
             "x_acr_priority_attribute": self.attrs,
             "x_acr_priority_weight": self.weights,

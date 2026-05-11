@@ -142,6 +142,12 @@ function toggleBacklogHelp() {
 }
 </script>
 
+<!-- Filter-active banner (shown only when one or more filters are non-default) -->
+<div id="filterBanner" class="filter-banner" style="display:none;margin-bottom:0.75rem;">
+    <span class="filter-banner-text"></span>
+    <button onclick="clearAllFilters()">Clear filters</button>
+</div>
+
 <!-- Bulk Edit Bar -->
 <div id="bulkBar" style="display:none;background:#111;color:#fff;padding:0.75rem 1rem;border-radius:8px;
     margin-bottom:0.75rem;align-items:center;gap:1rem;flex-wrap:wrap;">
@@ -184,6 +190,7 @@ function toggleBacklogHelp() {
                 <th class="sortable" data-col="12" data-type="str">Assignee</th>
                 <th class="sortable" data-col="13" data-type="str">Age</th>
                 <th class="sortable" data-col="14" data-type="str">Created</th>
+                <th class="sortable" data-col="15" data-type="str">Tags</th>
             </tr>
             <tr class="filter-row">
                 <th><select data-col="0"><option value="">All</option></select></th>
@@ -201,6 +208,7 @@ function toggleBacklogHelp() {
                 <th><select data-col="12"><option value="">All</option></select></th>
                 <th><select data-col="13"><option value="">All</option></select></th>
                 <th><select data-col="14"><option value="">All</option></select></th>
+                <th><select data-col="15" id="tagFilter"><option value="">All</option></select></th>
             </tr>
         </thead>
         <tbody>
@@ -240,6 +248,9 @@ function toggleBacklogHelp() {
                 <td style="font-size:0.8rem;">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray">{{ task._assignee }}</span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
                 <td><span class="badge {% if task._age == '>90' %}badge-yellow{% elif task._age == '60-90' %}badge-blue{% else %}badge-gray{% endif %}">{{ task._age }}</span></td>
                 <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
+                <td data-tags="{{ (task.get('_tags') or []) | map(attribute='name') | join(',') }}">
+                    {% for tag in task.get('_tags') or [] %}<span class="tag-chip">{{ tag.name }}</span>{% endfor %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -549,15 +560,85 @@ function updateTicketStatus(ticketId) {
 }
 
 // ---- Filter dropdowns ----
+const TAG_FILTER_COL = 15;                              // see column order in <thead>
+const FILTERS_STORAGE_KEY = 'backlogFilters:{{ view_mode }}';
 const table = document.getElementById('backlog-table');
 const filterSelects = table.querySelectorAll('.filter-row select');
+
+// Saved selections survive across page loads (per view-mode bucket so
+// Projects-tab filters don't leak into Helpdesk-tab options that don't exist).
+function loadSavedFilters() {
+    try {
+        const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+}
+function saveFilters(map) {
+    try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(map)); } catch {}
+}
+
+const savedFilters = loadSavedFilters();
+
 filterSelects.forEach(select => {
     const col = parseInt(select.dataset.col);
-    const values = new Set();
-    table.querySelectorAll('tbody tr').forEach(row => { const t = row.cells[col].textContent.trim(); if (t) values.add(t); });
-    Array.from(values).sort((a,b) => { const na=parseFloat(a),nb=parseFloat(b); if(!isNaN(na)&&!isNaN(nb)) return na-nb; return a.localeCompare(b); })
-        .forEach(val => { const o = document.createElement('option'); o.value = val; o.textContent = val; select.appendChild(o); });
-    select.addEventListener('change', applyFilters);
+
+    if (col === TAG_FILTER_COL) {
+        // Tags column is rendered as multiple chips per cell — we can't
+        // derive options from cell text. Use the canonical project.tags
+        // list from /api/options (populated by panel.js), plus an
+        // explicit "Untagged" bucket.
+        const populateTags = () => {
+            // Avoid duplicating options on re-population
+            Array.from(select.options).forEach(o => { if (o.value !== '') o.remove(); });
+            const untagged = document.createElement('option');
+            untagged.value = '__untagged__';
+            untagged.textContent = 'Untagged';
+            select.appendChild(untagged);
+            (fieldOptions?.tags || []).forEach(t => {
+                const o = document.createElement('option');
+                o.value = t.name;
+                o.textContent = t.name;
+                select.appendChild(o);
+            });
+            // Restore any saved selection after options are present
+            if (savedFilters[col] !== undefined) select.value = savedFilters[col];
+            refreshFilterIndicators();
+        };
+        if (fieldOptions) populateTags();
+        // panel.js loads /api/options async — poll briefly until it's ready
+        else {
+            const iv = setInterval(() => {
+                if (fieldOptions) { clearInterval(iv); populateTags(); }
+            }, 200);
+            setTimeout(() => clearInterval(iv), 5000);
+        }
+    } else {
+        const values = new Set();
+        table.querySelectorAll('tbody tr').forEach(row => {
+            const t = row.cells[col]?.textContent.trim();
+            if (t) values.add(t);
+        });
+        Array.from(values).sort((a, b) => {
+            const na = parseFloat(a), nb = parseFloat(b);
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+        }).forEach(val => {
+            const o = document.createElement('option');
+            o.value = val; o.textContent = val;
+            select.appendChild(o);
+        });
+        if (savedFilters[col] !== undefined) select.value = savedFilters[col];
+    }
+
+    select.addEventListener('change', () => {
+        const map = {};
+        filterSelects.forEach(s => {
+            if (s.value) map[parseInt(s.dataset.col)] = s.value;
+        });
+        saveFilters(map);
+        applyFilters();
+        refreshFilterIndicators();
+    });
     select.addEventListener('click', e => e.stopPropagation());
 });
 
@@ -565,11 +646,66 @@ function applyFilters() {
     const filters = {};
     filterSelects.forEach(s => { const c = parseInt(s.dataset.col), v = s.value; if (v) filters[c] = v; });
     table.querySelectorAll('tbody tr').forEach(row => {
+        if (!row.dataset.taskId) return; // skip group header rows
         let vis = true;
-        for (const [c,f] of Object.entries(filters)) { if (row.cells[parseInt(c)].textContent.trim() !== f) { vis = false; break; } }
+        for (const [c, f] of Object.entries(filters)) {
+            const col = parseInt(c);
+            const cell = row.cells[col];
+            if (!cell) { vis = false; break; }
+            if (col === TAG_FILTER_COL) {
+                const tags = (cell.dataset.tags || '').split(',').filter(Boolean);
+                if (f === '__untagged__') { if (tags.length) { vis = false; break; } }
+                else if (!tags.includes(f)) { vis = false; break; }
+            } else if (cell.textContent.trim() !== f) {
+                vis = false; break;
+            }
+        }
         row.style.display = vis ? '' : 'none';
     });
 }
+
+// Visual indicator: highlight any select with a non-default value and
+// surface a "filters active" banner so the user can't miss that the
+// list is being trimmed.
+function refreshFilterIndicators() {
+    let activeCount = 0;
+    const activeLabels = [];
+    filterSelects.forEach(s => {
+        if (s.value) {
+            s.classList.add('active-filter');
+            activeCount++;
+            const headerCell = table.querySelector('thead tr:first-child th[data-col="' + s.dataset.col + '"]');
+            const label = headerCell ? headerCell.textContent.trim() : 'col ' + s.dataset.col;
+            const displayValue = s.value === '__untagged__' ? 'Untagged' : s.value;
+            activeLabels.push(label + '=' + displayValue);
+        } else {
+            s.classList.remove('active-filter');
+        }
+    });
+    const banner = document.getElementById('filterBanner');
+    if (banner) {
+        if (activeCount === 0) {
+            banner.style.display = 'none';
+        } else {
+            banner.style.display = 'inline-flex';
+            banner.querySelector('.filter-banner-text').textContent =
+                activeCount + ' filter' + (activeCount === 1 ? '' : 's') +
+                ' active — ' + activeLabels.join(', ');
+        }
+    }
+}
+
+function clearAllFilters() {
+    filterSelects.forEach(s => { s.value = ''; });
+    saveFilters({});
+    applyFilters();
+    refreshFilterIndicators();
+}
+
+// Restore on first load — selects already had .value set above, just need
+// to apply the filter and paint the indicators.
+applyFilters();
+refreshFilterIndicators();
 
 // ---- Sorting ----
 const headers = table.querySelectorAll('th.sortable');
