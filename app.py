@@ -1499,6 +1499,13 @@ async def api_update_ticket_status(request: Request, ticket_id: int):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Bust the cached task/ticket lists so the next /backlog render
+    # reflects the new stage (a closed ticket should drop off the open
+    # list immediately, not in 15 minutes).
+    cache_clear(creds["uid"], "open_tickets")
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
+
     return {"ok": True}
 
 

@@ -503,6 +503,26 @@ class TestApiTicket:
         assert values == {"stage_id": 200}
         assert ids == [101274]
 
+    def test_update_ticket_status_invalidates_caches(self, authed_client):
+        """Without this, closing a ticket via the inline picker leaves
+        the cached open_tickets list showing it as still open for
+        another 15 minutes."""
+        # Prime the cache by hitting both views
+        authed_client.get("/backlog?view=tasks")
+        authed_client.get("/backlog?view=tickets")
+        cache = app._data_cache.get(TEST_UID, {})
+        assert "open_tickets" in cache
+        assert "open_tasks" in cache
+        # Status change
+        authed_client.post(
+            "/api/ticket/101274/update-status",
+            json={"stage_id": 200},
+            headers=ORIGIN,
+        )
+        cache = app._data_cache.get(TEST_UID, {})
+        assert "open_tickets" not in cache
+        assert "open_tasks" not in cache
+
     def test_update_ticket_status_requires_stage(self, authed_client):
         r = authed_client.post(
             "/api/ticket/101274/update-status",

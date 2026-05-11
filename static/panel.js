@@ -412,11 +412,64 @@ function onTaskUpdated(task) {
     // Update backlog table row if it exists
     updateBacklogRow(task);
 
+    // Reposition the row by score (the edit may have changed it)
+    resortBacklogByScore(task.id);
+
+    // Flash the updated row so the user sees that the change took effect
+    flashRow(task.id);
+
     // Update gantt bar if it exists
     updateGanttBar(task);
 
     // Refresh filter dropdowns
     refreshFilters();
+}
+
+// Briefly highlight the row that was just updated. The flash gives
+// definitive visual feedback that the save propagated — without it,
+// the row repaint can be so subtle (a stage badge swap, a score
+// changing by 1) that users assume nothing happened and reach for refresh.
+function flashRow(taskId) {
+    const row = document.querySelector('tr[data-task-id="' + taskId + '"]');
+    if (!row) return;
+    const prevBg = row.style.backgroundColor;
+    const prevTransition = row.style.transition;
+    row.style.transition = 'background-color 0.2s ease-out';
+    row.style.backgroundColor = '#fef3c7'; // amber-100
+    setTimeout(() => {
+        row.style.backgroundColor = prevBg;
+        setTimeout(() => { row.style.transition = prevTransition; }, 250);
+    }, 600);
+}
+
+// Move the row to its correct position in the score-sorted list. After
+// an edit that changes the score, the row's data is updated in place but
+// it stays at the original position — which makes "I changed Issue Type
+// to System-Stopping Bug but it didn't move to the top" feel like a
+// caching bug. This patches that.
+function resortBacklogByScore(changedTaskId) {
+    const tbody = document.querySelector('#backlog-table tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr[data-task-id]'));
+    if (rows.length < 2) return;
+    const scored = rows.map(r => ({
+        row: r,
+        score: parseInt(r.cells[0]?.textContent) || 0,
+    }));
+    scored.sort((a, b) => a.score - b.score);
+    // Only reattach if the order actually changed (DOM moves are cheap
+    // but cause layout, so skip the no-op case).
+    let changed = false;
+    for (let i = 0; i < scored.length; i++) {
+        if (rows[i] !== scored[i].row) { changed = true; break; }
+    }
+    if (!changed) return;
+    // Reuse the grouped-vs-prioritized layout from backlog.html when present
+    if (typeof applySubView === 'function') {
+        applySubView();
+    } else {
+        scored.forEach(s => tbody.appendChild(s.row));
+    }
 }
 
 // Full row repaint after a save. Column order in backlog.html:
@@ -550,7 +603,11 @@ function savePanel(e) {
 
             // Pull the refreshed task back — score, related fields,
             // and any Odoo-side recomputation are now reflected.
-            return fetch('/api/task/' + currentTaskId).then(r => r.json());
+            // `cache: 'no-cache'` forces revalidation even if a browser
+            // heuristically cached the prior GET (belt-and-suspenders
+            // alongside the server's Cache-Control: no-store header).
+            return fetch('/api/task/' + currentTaskId, { cache: 'no-cache' })
+                .then(r => r.json());
         })
         .then(taskData => {
             if (taskData && taskData.task) {
@@ -558,11 +615,14 @@ function savePanel(e) {
                 // The form values we just saved are the new "initial" —
                 // capture them so further edits diff from this point.
                 capturePanelInitialValues();
+            } else {
+                console.warn('Post-save fetch returned unexpected shape', taskData);
             }
         })
         .catch(err => {
             btn.disabled = false; btn.textContent = 'Save Changes';
             status.textContent = '✗ ' + err.message; status.style.color = '#dc2626';
+            console.error('Save failed:', err);
         });
     return false;
 }

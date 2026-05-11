@@ -415,9 +415,22 @@ function applyBulkEdit() {
     if (userId) payload.user_ids = [userId];
     msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
     const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
-    if (stageLabel) ids.forEach(id => {
+    const assigneeLabel = userId ? document.getElementById('bulkAssignee').selectedOptions[0].text : null;
+    // Optimistic UI update — Status is column 5, Assignee is column 12.
+    // The old code wrote the status badge to column 4 (the Customer cell).
+    ids.forEach(id => {
         const row = document.querySelector('tr[data-task-id="'+id+'"]');
-        if (row) { const c = row.cells[4]; if (c) c.innerHTML = '<span class="badge badge-gray">'+escHtml(stageLabel)+'</span>'; }
+        if (!row || row.cells.length < 13) return;
+        if (stageLabel) {
+            let badgeCls = 'badge-gray';
+            if (stageLabel.includes('Progress')) badgeCls = 'badge-yellow';
+            else if (stageLabel.includes('Queued')) badgeCls = 'badge-blue';
+            row.cells[5].innerHTML = '<span class="badge '+badgeCls+'">'+escHtml(stageLabel)+'</span>';
+        }
+        if (assigneeLabel) {
+            row.cells[12].innerHTML = '<span class="badge badge-gray">'+escHtml(assigneeLabel)+'</span>';
+        }
+        if (typeof flashRow === 'function') flashRow(id);
     });
     fetch('/api/tasks/bulk-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
         .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail); }); return r.json(); })
@@ -511,12 +524,27 @@ function renderClosedTicket(data) {
 function updateTicketStatus(ticketId) {
     const sel = document.getElementById('ticketStageSelect'), msg = document.getElementById('ticketStatusMsg');
     if (!sel.value) return;
+    const newStageText = sel.options[sel.selectedIndex].text;
     msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
     sel.dataset.original = sel.value;
     document.getElementById('ticketStatusSave').style.display = 'none';
     fetch('/api/ticket/'+ticketId+'/update-status', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({stage_id:parseInt(sel.value)}) })
         .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail); }); return r.json(); })
-        .then(() => { msg.textContent = '✓ Updated'; msg.style.color = '#16a34a'; document.getElementById('ticketStatusSave').style.display = 'flex'; setTimeout(() => { document.getElementById('ticketStatusSave').style.display = 'none'; }, 2000); })
+        .then(() => {
+            msg.textContent = '✓ Updated'; msg.style.color = '#16a34a';
+            // Patch the row in the backlog so the new stage is visible
+            // immediately. Without this, the Helpdesk tab still shows the
+            // old stage until the user refreshes.
+            const row = document.querySelector('tr[data-task-id="'+ticketId+'"]');
+            if (row && row.cells.length > 5) {
+                let badgeCls = 'badge-gray';
+                if (newStageText.includes('Progress')) badgeCls = 'badge-yellow';
+                else if (newStageText.includes('Queued')) badgeCls = 'badge-blue';
+                row.cells[5].innerHTML = '<span class="badge '+badgeCls+'">'+escHtml(newStageText)+'</span>';
+                if (typeof flashRow === 'function') flashRow(ticketId);
+            }
+            setTimeout(() => { document.getElementById('ticketStatusSave').style.display = 'none'; }, 2000);
+        })
         .catch(e => { msg.textContent = '✗ '+e.message; msg.style.color = '#dc2626'; document.getElementById('ticketStatusSave').style.display = 'flex'; });
 }
 
