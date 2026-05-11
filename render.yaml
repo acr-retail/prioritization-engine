@@ -1,0 +1,32 @@
+# Render Blueprint — deployment config for prioritization-engine.onrender.com
+#
+# This file is the source of truth for how the app deploys. Changes here
+# take effect on next push to main.
+#
+# Module-level caches in app.py (active_users, _data_cache,
+# _selection_labels_cache) assume a single worker. Do not raise --workers
+# without first moving that state to shared storage (Redis/SQLite).
+services:
+  - type: web
+    name: prioritization-engine
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 60 --access-logfile -
+    healthCheckPath: /login
+    envVars:
+      # Secrets stay managed in the dashboard (sync: false = never push from yaml).
+      - key: ODOO_URL
+        sync: false
+      - key: ODOO_DB
+        sync: false
+      # SECRET_KEY is required and must not be the dev default. The app
+      # refuses to start without it.
+      - key: SECRET_KEY
+        generateValue: true
+      # Comma-separated origins permitted for state-changing POSTs (CSRF
+      # defense). Must include the Render URL and any custom domains.
+      - key: ACR_ALLOWED_ORIGINS
+        sync: false
