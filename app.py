@@ -16,15 +16,18 @@ from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from itsdangerous import URLSafeSerializer
-from starlette.middleware.sessions import SessionMiddleware
 
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
+import base64
+import hashlib
+import json as _json
 import os
+from http import cookies as _cookies
 from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi.responses import JSONResponse
 
 _DEV_SECRET = "acr-priority-dev-secret-change-in-prod"
@@ -52,12 +55,99 @@ _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # https origin is in the allowlist).
 _HTTPS_ONLY = any(o.startswith("https://") for o in ALLOWED_ORIGINS)
 
+# ---------------------------------------------------------------------------
+# Encrypted session cookie
+# ---------------------------------------------------------------------------
+# The session payload (uid + login + Odoo API key) is AES-encrypted before
+# being placed in the cookie. Anyone reading the raw cookie value — browser
+# dev tools, malware scraping cookie stores, a misconfigured proxy log —
+# sees opaque bytes, not the API key. Starlette's bundled SessionMiddleware
+# only *signs* (tamper-evident); it does not encrypt.
+_fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest()))
+_SESSION_COOKIE = "acr_session"
+_SESSION_MAX_AGE = 14 * 24 * 3600  # 14 days
+
+
+class EncryptedSessionMiddleware:
+    """ASGI middleware that stores session state in a Fernet-encrypted cookie.
+
+    Preserves Starlette's request.session contract (a dict on scope["session"]).
+    Cookie is only re-issued when the session actually changes, so most
+    request paths add zero crypto overhead.
+    """
+
+    def __init__(self, app, fernet, cookie_name, max_age, https_only, same_site="lax"):
+        self.app = app
+        self.fernet = fernet
+        self.cookie_name = cookie_name
+        self.max_age = max_age
+        self.https_only = https_only
+        self.same_site = same_site
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Load existing session from the encrypted cookie (if any)
+        session = {}
+        cookie_header = b""
+        for name, value in scope.get("headers", []):
+            if name == b"cookie":
+                cookie_header = value
+                break
+        if cookie_header:
+            jar = _cookies.SimpleCookie()
+            jar.load(cookie_header.decode("latin-1"))
+            morsel = jar.get(self.cookie_name)
+            if morsel:
+                try:
+                    raw = self.fernet.decrypt(morsel.value.encode(), ttl=self.max_age)
+                    session = _json.loads(raw)
+                    if not isinstance(session, dict):
+                        session = {}
+                except (InvalidToken, ValueError, _json.JSONDecodeError):
+                    session = {}
+
+        scope["session"] = session
+        # Snapshot for change detection so we only set-cookie when needed.
+        initial = _json.dumps(session, sort_keys=True, separators=(",", ":"))
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                current = _json.dumps(
+                    scope.get("session") or {}, sort_keys=True, separators=(",", ":")
+                )
+                if current != initial:
+                    headers = list(message.get("headers", []))
+                    if scope.get("session"):
+                        token = self.fernet.encrypt(current.encode()).decode()
+                        cookie = (
+                            f"{self.cookie_name}={token}; Path=/; HttpOnly; "
+                            f"Max-Age={self.max_age}; SameSite={self.same_site}"
+                        )
+                    else:
+                        cookie = (
+                            f"{self.cookie_name}=; Path=/; HttpOnly; Max-Age=0; "
+                            f"SameSite={self.same_site}"
+                        )
+                    if self.https_only:
+                        cookie += "; Secure"
+                    headers.append((b"set-cookie", cookie.encode("latin-1")))
+                    message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 app = FastAPI(title="ACR Prioritization Engine")
 app.add_middleware(
-    SessionMiddleware,
-    secret_key=SECRET_KEY,
-    same_site="lax",
+    EncryptedSessionMiddleware,
+    fernet=_fernet,
+    cookie_name=_SESSION_COOKIE,
+    max_age=_SESSION_MAX_AGE,
     https_only=_HTTPS_ONLY,
+    same_site="lax",
 )
 
 
