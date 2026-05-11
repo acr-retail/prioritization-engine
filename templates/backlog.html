@@ -300,6 +300,7 @@ function filterByPriority(level) {
 
         row.style.display = show ? '' : 'none';
     });
+    if (typeof hideEmptyProjectGroups === 'function') hideEmptyProjectGroups();
 }
 
 // ---- Row click ----
@@ -602,6 +603,41 @@ function applyFilters() {
         }
         row.style.display = vis ? '' : 'none';
     });
+    hideEmptyProjectGroups();
+}
+
+// Walk the tbody in order. For every project-group-row, count how many
+// task rows beneath it are currently visible. If zero, hide the group
+// header — otherwise a filter like Tags=Enhancement leaves the table
+// cluttered with project headers that have no matching tasks.
+function hideEmptyProjectGroups() {
+    const tbody = document.querySelector('#backlog-table tbody');
+    if (!tbody) return;
+    let currentGroup = null;
+    let visibleInGroup = 0;
+    let totalInGroup = 0;
+    const finalize = () => {
+        if (!currentGroup) return;
+        currentGroup.style.display = visibleInGroup > 0 ? '' : 'none';
+        const countSpan = currentGroup.querySelector('.group-count');
+        if (countSpan) {
+            countSpan.textContent = visibleInGroup === totalInGroup
+                ? '(' + totalInGroup + ' tasks)'
+                : '(' + visibleInGroup + ' of ' + totalInGroup + ' tasks)';
+        }
+    };
+    Array.from(tbody.children).forEach(row => {
+        if (row.classList.contains('project-group-row')) {
+            finalize();
+            currentGroup = row;
+            visibleInGroup = 0;
+            totalInGroup = 0;
+        } else if (row.dataset.taskId) {
+            totalInGroup++;
+            if (row.style.display !== 'none') visibleInGroup++;
+        }
+    });
+    finalize();
 }
 
 // Visual indicator: highlight any select with a non-default value and
@@ -725,12 +761,15 @@ function applySubView() {
                 groupRow.innerHTML = '<td colspan="' + colCount + '">' +
                     '<span class="collapse-icon" onclick="toggleProjectGroup(this.closest(\'tr\'))" style="cursor:pointer;">▼</span> ' +
                     '<span onclick="if('+projId+')openProjectPanel('+projId+')" style="cursor:pointer;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;">' +
-                    escHtml(proj) + '</span> <span style="font-weight:400;color:#64748b;cursor:pointer;" onclick="toggleProjectGroup(this.closest(\'tr\'))">(' + count + ' tasks)</span></td>';
+                    escHtml(proj) + '</span> <span class="group-count" style="font-weight:400;color:#64748b;cursor:pointer;" onclick="toggleProjectGroup(this.closest(\'tr\'))">(' + count + ' tasks)</span></td>';
                 tbody.appendChild(groupRow);
                 lastProject = proj;
             }
             tbody.appendChild(row);
         });
+        // Group headers were just rebuilt — re-apply the empty-group
+        // hide so any active filter still suppresses empty headers.
+        if (typeof hideEmptyProjectGroups === 'function') hideEmptyProjectGroups();
     } else {
         // Prioritized: sort by score
         dataRows.sort((a, b) => {
