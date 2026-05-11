@@ -64,8 +64,6 @@ if (!window.location.search.includes('view=')) {
             <button class="btn btn-ghost" onclick="refreshBacklog()">Refresh</button>
             <button class="btn btn-ghost" onclick="openClosedLookup()">View Closed Ticket</button>
             <button class="btn btn-ghost" id="bulkEditToggle" onclick="toggleBulkMode()">Bulk Edit</button>
-            <button class="btn btn-ghost" id="groomToggle" onclick="toggleGroomFilter()">Show Ungroomed</button>
-            <button class="btn btn-ghost" id="hideUngroomedToggle" onclick="toggleHideUngroomed()">Hide Ungroomed</button>
             <button class="btn btn-ghost" onclick="toggleBacklogHelp()">Help</button>
         </div>
     </div>
@@ -102,8 +100,6 @@ if (!window.location.search.includes('view=')) {
                 <li>A task is <strong>"groomed"</strong> when it has <strong>Issue Type</strong>, <strong>Level of Effort</strong>, and <strong>Customer</strong> filled in</li>
                 <li>Ungroomed items show a purple <span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.3rem;border-radius:9999px;font-size:0.65rem;font-weight:600;">N missing</span> badge — hover to see which fields are empty</li>
                 <li>Empty fields score <strong>10 points each</strong> (configurable as "Not Set" on the Weights page), pushing ungroomed items toward the bottom</li>
-                <li><strong>Show Ungroomed</strong> — shows only items missing 2+ fields that need attention</li>
-                <li><strong>Hide Ungroomed</strong> — hides items missing 2+ fields so you see only actionable work</li>
             </ul>
         </div>
         <div>
@@ -303,62 +299,6 @@ function filterByPriority(level) {
         else if (level === 'low') show = score >= th.medium;
 
         row.style.display = show ? '' : 'none';
-    });
-}
-
-// ---- Grooming Filters ----
-let groomFilter = 'all'; // 'all', 'ungroomed', 'groomed'
-
-function toggleGroomFilter() {
-    const btn = document.getElementById('groomToggle');
-    if (groomFilter === 'ungroomed') {
-        groomFilter = 'all';
-        btn.textContent = 'Show Ungroomed';
-        btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
-    } else {
-        groomFilter = 'ungroomed';
-        btn.textContent = 'Showing Ungroomed';
-        btn.style.background = '#8b5cf6'; btn.style.color = '#fff'; btn.style.borderColor = '#8b5cf6';
-    }
-    // Reset hide toggle
-    const hideBtn = document.getElementById('hideUngroomedToggle');
-    hideBtn.textContent = 'Hide Ungroomed';
-    hideBtn.style.background = ''; hideBtn.style.color = ''; hideBtn.style.borderColor = '';
-    applyGroomFilter();
-}
-
-function toggleHideUngroomed() {
-    const btn = document.getElementById('hideUngroomedToggle');
-    if (groomFilter === 'groomed') {
-        groomFilter = 'all';
-        btn.textContent = 'Hide Ungroomed';
-        btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
-    } else {
-        groomFilter = 'groomed';
-        btn.textContent = 'Hiding Ungroomed';
-        btn.style.background = '#16a34a'; btn.style.color = '#fff'; btn.style.borderColor = '#16a34a';
-    }
-    // Reset show toggle
-    const showBtn = document.getElementById('groomToggle');
-    showBtn.textContent = 'Show Ungroomed';
-    showBtn.style.background = ''; showBtn.style.color = ''; showBtn.style.borderColor = '';
-    applyGroomFilter();
-}
-
-function applyGroomFilter() {
-    const rows = document.querySelectorAll('#backlog-table tbody tr');
-    rows.forEach(row => {
-        const badge = row.querySelector('[data-ungroomed]');
-        const missingCount = badge ? parseInt(badge.textContent) || 0 : 0;
-        if (groomFilter === 'ungroomed') {
-            // Show only items missing 2+ fields
-            row.style.display = missingCount >= 2 ? '' : 'none';
-        } else if (groomFilter === 'groomed') {
-            // Hide items missing 2+ fields (likely need grooming)
-            row.style.display = missingCount >= 2 ? 'none' : '';
-        } else {
-            row.style.display = '';
-        }
     });
 }
 
