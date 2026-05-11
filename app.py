@@ -340,36 +340,75 @@ def sanitize_html(value):
 # ---------------------------------------------------------------------------
 # Weight storage (Odoo)
 # ---------------------------------------------------------------------------
+def _weight_attr_id(weight_row) -> int:
+    """x_attribute_id reads as [id, name] for m2o; normalize to the id."""
+    aid = weight_row.get("x_attribute_id")
+    if isinstance(aid, (list, tuple)):
+        return aid[0] if aid else 0
+    return aid or 0
+
+
 def load_weight_map(uid: int, api_key: str) -> dict:
-    """Load all weights from Odoo into a dict for scoring."""
-    attrs = odoo_search_read(uid, api_key, ATTR_MODEL, [],
-                             ["x_name", "x_task_field", "x_field_type", "x_sequence"])
+    """Load all weights from Odoo into a dict for scoring.
+
+    Uses two queries total (attributes + weights-in-bulk) rather than the
+    1 + N pattern of fetching weights per attribute. With 8 attributes
+    that is 9 round trips → 2.
+    """
+    attrs = odoo_search_read(
+        uid, api_key, ATTR_MODEL, [],
+        ["x_name", "x_task_field", "x_field_type", "x_sequence"],
+    )
+    if not attrs:
+        return {}
+
+    attr_ids = [a["id"] for a in attrs]
+    weights = odoo_search_read(
+        uid, api_key, WEIGHT_MODEL,
+        [("x_attribute_id", "in", attr_ids)],
+        ["x_value", "x_weight", "x_attribute_id"],
+    )
+    by_attr = defaultdict(list)
+    for w in weights:
+        by_attr[_weight_attr_id(w)].append(w)
 
     result = {}
     for attr in attrs:
-        weights = odoo_search_read(uid, api_key, WEIGHT_MODEL,
-                                   [("x_attribute_id", "=", attr["id"])],
-                                   ["x_value", "x_weight"])
         result[attr["x_task_field"]] = {
             "name": attr["x_name"],
             "field_type": attr["x_field_type"],
-            "values": {w["x_value"]: w["x_weight"] for w in weights},
+            "values": {w["x_value"]: w["x_weight"] for w in by_attr[attr["id"]]},
         }
     return result
 
 
 def load_attributes_for_config(uid: int, api_key: str) -> list:
-    """Load all attributes with their weights for the config page."""
-    attrs = odoo_search_read(uid, api_key, ATTR_MODEL, [],
-                             ["x_name", "x_task_field", "x_field_type", "x_sequence"])
+    """Load all attributes with their weights for the config page.
+
+    Two-query batched read (see load_weight_map for rationale).
+    """
+    attrs = odoo_search_read(
+        uid, api_key, ATTR_MODEL, [],
+        ["x_name", "x_task_field", "x_field_type", "x_sequence"],
+    )
     attrs.sort(key=lambda a: a.get("x_sequence", 0))
+    if not attrs:
+        return []
+
+    attr_ids = [a["id"] for a in attrs]
+    weights = odoo_search_read(
+        uid, api_key, WEIGHT_MODEL,
+        [("x_attribute_id", "in", attr_ids)],
+        ["x_value", "x_weight", "x_description", "x_attribute_id"],
+    )
+    by_attr = defaultdict(list)
+    for w in weights:
+        by_attr[_weight_attr_id(w)].append(w)
+    for bucket in by_attr.values():
+        bucket.sort(key=lambda w: w.get("x_weight", 0))
 
     result = []
     for attr in attrs:
-        weights = odoo_search_read(uid, api_key, WEIGHT_MODEL,
-                                   [("x_attribute_id", "=", attr["id"])],
-                                   ["x_value", "x_weight", "x_description"])
-        weights.sort(key=lambda w: w.get("x_weight", 0))
         result.append({
             "attr": {
                 "id": attr["id"],
@@ -380,7 +419,7 @@ def load_attributes_for_config(uid: int, api_key: str) -> list:
             "weights": [
                 {"id": w["id"], "value": w["x_value"], "weight": w["x_weight"],
                  "description": w.get("x_description", "")}
-                for w in weights
+                for w in by_attr[attr["id"]]
             ],
         })
     return result
