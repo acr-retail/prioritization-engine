@@ -508,6 +508,49 @@ async def _odoo(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+# Sentinel: convert_value returns this when the value should not be sent
+# to Odoo. The caller filters these out with `if result is not _SKIP`.
+_SKIP = object()
+
+
+def convert_value(val, ftype):
+    """Map a form value (string, bool, or empty) to its Odoo write shape.
+
+    Critical rule: an empty string means "the user picked the — option
+    and wants to clear this field." Each type decides what "clear" means
+    in Odoo terms:
+
+      • many2many_single → [(5, 0, 0)]  (unset all relations)
+      • int_or_false     → False        (unset many2one)
+      • date_or_false    → False        (unset date)
+      • string_or_false  → False        (unset selection / text)
+      • float            → 0.0
+      • bool             → False
+      • int / string     → _SKIP        (no Odoo-side notion of "no value")
+    """
+    is_empty = val is None or val == ""
+
+    if ftype == "bool":
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return bool(val)
+    if ftype == "int":
+        return _SKIP if is_empty else int(val)
+    if ftype == "int_or_false":
+        return False if is_empty else int(val)
+    if ftype == "float":
+        return 0.0 if is_empty else float(val)
+    if ftype == "date_or_false":
+        return False if is_empty else val
+    if ftype == "string_or_false":
+        return False if is_empty else val
+    if ftype == "string":
+        return _SKIP if is_empty else val
+    if ftype == "many2many_single":
+        return [(5, 0, 0)] if is_empty else [(6, 0, [int(val)])]
+    return val
+
+
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
@@ -1114,41 +1157,24 @@ async def update_task(request: Request, task_id: int):
         "x_studio_related_field_27d_1jnftbs3p": ("x_studio_paid_prioritization", "bool"),
     }
 
-    def convert_value(val, ftype):
-        if val == "" and ftype not in ("bool",):
-            return None  # skip
-        if ftype == "bool":
-            if isinstance(val, str):
-                return val.lower() in ("true", "1", "yes")
-            return bool(val)
-        elif ftype in ("int", "int_or_false"):
-            return int(val) if val and str(val).strip() else False
-        elif ftype == "float":
-            return float(val) if val else 0.0
-        elif ftype == "date_or_false":
-            return val if val else False
-        elif ftype == "string_or_false":
-            return val if val else False
-        elif ftype == "many2many_single":
-            return [(6, 0, [int(val)])] if val else [(5, 0, 0)]
-        return val
-
-    # Process task fields
+    # Process task fields. convert_value returns _SKIP for values that
+    # shouldn't be sent (empty title, empty stage_id, etc.). Any other
+    # return — including False, 0, [], "" — means "write this value to
+    # Odoo". That's how clearing fields works.
     task_values = {}
     for key, (odoo_field, ftype) in task_field_map.items():
         if key not in data:
             continue
         result = convert_value(data[key], ftype)
-        if result is not None:
+        if result is not _SKIP:
             task_values[odoo_field] = result
 
-    # Process ticket fields
     ticket_values = {}
     for key, (odoo_field, ftype) in ticket_field_map.items():
         if key not in data:
             continue
         result = convert_value(data[key], ftype)
-        if result is not None:
+        if result is not _SKIP:
             ticket_values[odoo_field] = result
 
     updated = 0
