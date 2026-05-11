@@ -4,9 +4,13 @@ Talks to Odoo via JSON-RPC. Auth via Odoo API keys.
 """
 import json
 import logging
+import re
 import xmlrpc.client
 from datetime import date
+from html import escape as html_escape
 from pathlib import Path
+
+import bleach
 
 import time as _time
 from collections import defaultdict
@@ -284,6 +288,54 @@ FIELD_LABELS = {
     "x_studio_related_field_gd_1jnftb4gl": "Customer Funded",
     "x_studio_related_field_27d_1jnftbs3p": "Paid Priority",
 }
+
+# ---------------------------------------------------------------------------
+# HTML sanitization
+# ---------------------------------------------------------------------------
+# Odoo chatter messages and Studio descriptions are arbitrary HTML — and
+# customer-submitted helpdesk tickets can include script tags. Anything
+# rendered via innerHTML on the client must pass through here first.
+_HTML_ALLOWED_TAGS = {
+    "a", "abbr", "b", "blockquote", "br", "code", "div", "em", "h1", "h2",
+    "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre",
+    "small", "span", "strong", "sub", "sup", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "u", "ul",
+}
+_HTML_ALLOWED_ATTRS = {
+    "a": ["href", "title", "target", "rel"],
+    "img": ["src", "alt", "title", "width", "height"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
+    "*": ["class"],
+}
+_HTML_ALLOWED_PROTOCOLS = {"http", "https", "mailto", "tel"}
+
+# Bleach strips tags but leaves their text content — `<script>alert(1)</script>`
+# becomes the visible string "alert(1)". Safe (no execution) but ugly. Pre-strip
+# the dangerous tags *with* their contents for clean output.
+_DANGEROUS_TAGS_RE = re.compile(
+    r"<(script|style|iframe|object|embed|noscript|template|form)\b[^>]*>.*?</\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def sanitize_html(value):
+    """Clean Odoo-sourced HTML before sending to the browser.
+
+    Returns the original value untouched for non-strings (False, None, etc.)
+    so callers can pipe Odoo field reads through without type-checking.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    cleaned = _DANGEROUS_TAGS_RE.sub("", value)
+    return bleach.clean(
+        cleaned,
+        tags=_HTML_ALLOWED_TAGS,
+        attributes=_HTML_ALLOWED_ATTRS,
+        protocols=_HTML_ALLOWED_PROTOCOLS,
+        strip=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Weight storage (Odoo)
@@ -1114,6 +1166,8 @@ async def api_task_detail(request: Request, task_id: int):
             msg["_author"] = msg["author_id"][1]
         else:
             msg["_author"] = "System"
+        # Sanitize chatter HTML before it reaches innerHTML on the client
+        msg["body"] = sanitize_html(msg.get("body"))
 
     # Compute score
     weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
@@ -1126,6 +1180,7 @@ async def api_task_detail(request: Request, task_id: int):
     if isinstance(cust, (list, tuple)) and len(cust) > 1:
         task["_customer"] = cust[1]
     task["_grooming"] = compute_grooming(task)
+    task["description"] = sanitize_html(task.get("description"))
 
     return {
         "task": task,
@@ -1180,6 +1235,8 @@ async def api_ticket_detail(request: Request, ticket_id: int):
             msg["_author"] = msg["author_id"][1]
         else:
             msg["_author"] = "System"
+        msg["body"] = sanitize_html(msg.get("body"))
+    ticket["description"] = sanitize_html(ticket.get("description"))
 
     return {"ticket": ticket, "messages": messages}
 
@@ -1221,6 +1278,7 @@ async def api_project_detail(request: Request, project_id: int):
         t["_stage"] = t["stage_id"][1] if isinstance(t.get("stage_id"), (list, tuple)) else ""
 
     tasks.sort(key=lambda t: t["_score"])
+    project["description"] = sanitize_html(project.get("description"))
 
     return {"project": project, "tasks": tasks}
 
@@ -1237,8 +1295,10 @@ async def api_post_task_comment(request: Request, task_id: int):
     if not body:
         raise HTTPException(status_code=400, detail="Comment body is required")
 
-    # Convert newlines to <br> for HTML
-    html_body = body.replace("\n", "<br/>")
+    # Treat the user's input as plain text — escape HTML, then add <br/>
+    # for line breaks. Prevents stored XSS via comment field.
+    
+    html_body = html_escape(body).replace("\n", "<br/>")
 
     models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
     models_proxy.execute_kw(
@@ -1266,7 +1326,8 @@ async def api_post_ticket_comment(request: Request, ticket_id: int):
     if not body:
         raise HTTPException(status_code=400, detail="Comment body is required")
 
-    html_body = body.replace("\n", "<br/>")
+    
+    html_body = html_escape(body).replace("\n", "<br/>")
 
     models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
     models_proxy.execute_kw(
@@ -1398,6 +1459,8 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
             msg["_author"] = msg["author_id"][1]
         else:
             msg["_author"] = "System"
+        msg["body"] = sanitize_html(msg.get("body"))
+    ticket["description"] = sanitize_html(ticket.get("description"))
 
     return {
         "ticket": ticket,
