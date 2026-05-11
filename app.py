@@ -178,6 +178,21 @@ async def enforce_csrf_origin(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def no_cache_api(request: Request, call_next):
+    """Prevent browser caching of /api/* responses.
+
+    Without this, some browsers heuristically cache GET JSON responses.
+    When a user saves a panel edit and reopens the panel, the second
+    /api/task/{id} fetch can serve stale data — making the change look
+    like it reverted.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -1208,17 +1223,13 @@ async def api_task_detail(request: Request, task_id: int):
         # Sanitize chatter HTML before it reaches innerHTML on the client
         msg["body"] = sanitize_html(msg.get("body"))
 
-    # Compute score
+    # Enrich the task using the same code path as the backlog so the
+    # post-save row repaint has every field it needs.
     weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
     sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
-    task["_score"] = score_task(task, weight_map, sel_labels)
-    task["_age"] = compute_age_bracket(task.get("create_date", ""))
-    task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
-    task["_customer"] = ""
-    cust = task.get("x_studio_customer")
-    if isinstance(cust, (list, tuple)) and len(cust) > 1:
-        task["_customer"] = cust[1]
-    task["_grooming"] = compute_grooming(task)
+    enriched = enrich_tasks([task], weight_map, sel_labels)
+    resolve_user_names(enriched, creds["uid"], creds["api_key"])
+    task = enriched[0]
     task["description"] = sanitize_html(task.get("description"))
 
     return {

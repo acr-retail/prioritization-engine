@@ -302,6 +302,24 @@ function renderPanel(task, messages) {
         task.id + '&model=project.task&view_type=form" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;">Open in Odoo →</a></div>';
 
     document.getElementById('panelBody').innerHTML = html;
+    capturePanelInitialValues();
+}
+
+// Snapshot the form's current values so savePanel can compute a diff
+// and only send changed fields. Called whenever the panel renders.
+function capturePanelInitialValues() {
+    panelOriginalValues = {};
+    const form = document.getElementById('panelForm');
+    if (!form) return;
+    new FormData(form).forEach((v, k) => {
+        panelOriginalValues[k] = normalizeFormValue(v);
+    });
+}
+
+function normalizeFormValue(v) {
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return v;
 }
 
 // ---- Helpers ----
@@ -401,25 +419,84 @@ function onTaskUpdated(task) {
     refreshFilters();
 }
 
+// Full row repaint after a save. Column order in backlog.html:
+//   0:Score 1:Groom 2:ID 3:Title 4:Customer 5:Status 6:IssueType 7:Esc
+//   8:Funded 9:Effort 10:Paid 11:Roadmap 12:Assignee 13:Age 14:Created
 function updateBacklogRow(task) {
     const row = document.querySelector('tr[data-task-id="' + task.id + '"]');
-    if (!row) return;
+    if (!row || !row.cells || row.cells.length < 15) return;
+    const c = row.cells;
 
-    // Score (col 0)
-    const scoreCell = row.cells[0];
-    if (scoreCell) {
-        scoreCell.innerHTML = '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>';
+    // 0: Score
+    c[0].innerHTML = '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>';
+
+    // 1: Groom
+    const g = task._grooming || {};
+    if (g.groomed === false) {
+        c[1].innerHTML = '<span style="background:#f5f3ff;color:#8b5cf6;padding:0.1rem 0.4rem;border-radius:9999px;font-weight:600;font-size:0.65rem;" data-ungroomed="true">' + (g.missing_count || 0) + ' missing</span>';
+        c[1].title = (g.missing || []).join(', ');
+    } else {
+        c[1].innerHTML = '<span style="color:#d4d4d8;">✓</span>';
+        c[1].title = 'Fully groomed';
     }
 
-    // Status (col 4)
-    const statusCell = row.cells[4];
-    if (statusCell) {
-        const stage = task._stage || '';
-        let badgeCls = 'badge-gray';
-        if (stage.includes('Progress')) badgeCls = 'badge-yellow';
-        else if (stage.includes('Queued')) badgeCls = 'badge-blue';
-        statusCell.innerHTML = '<span class="badge ' + badgeCls + '">' + escHtml(stage) + '</span>';
+    // 3: Title — preserve truncation styling
+    const titleAnchor = c[3].querySelector('.truncate') || c[3];
+    titleAnchor.textContent = task.name || '';
+    if (titleAnchor.setAttribute) titleAnchor.setAttribute('title', task.name || '');
+
+    // 4: Customer
+    c[4].innerHTML = task._customer
+        ? '<span class="badge badge-blue">' + escHtml(task._customer) + '</span>'
+        : '';
+
+    // 5: Status
+    const stage = task._stage || '';
+    let stageBadge = 'badge-gray';
+    if (stage.includes('Progress')) stageBadge = 'badge-yellow';
+    else if (stage.includes('Queued')) stageBadge = 'badge-blue';
+    c[5].innerHTML = '<span class="badge ' + stageBadge + '">' + escHtml(stage) + '</span>';
+
+    // 6: Issue Type — show the resolved label (Emily's fix path)
+    c[6].textContent = task._issue_type_label || '';
+
+    // 7: Escalated
+    c[7].innerHTML = task.x_studio_related_field_5vi_1jnfmj9cf
+        ? '<span class="badge badge-yellow">Yes</span>'
+        : '<span style="color:#cbd5e1;">No</span>';
+
+    // 8: Funded — only "Yes" gets the green badge
+    const funded = task.x_studio_related_field_gd_1jnftb4gl || '';
+    c[8].innerHTML = funded === 'Yes'
+        ? '<span class="badge badge-green">Yes</span>'
+        : '<span style="color:#cbd5e1;">' + escHtml(funded || 'No') + '</span>';
+
+    // 9: Effort
+    c[9].textContent = task.x_studio_level_of_effort || '';
+
+    // 10: Paid
+    c[10].innerHTML = task.x_studio_related_field_27d_1jnftbs3p
+        ? '<span class="badge badge-yellow">Yes</span>'
+        : '<span style="color:#cbd5e1;">No</span>';
+
+    // 11: Roadmap
+    c[11].innerHTML = task.x_studio_road_map_flag
+        ? '<span class="badge badge-blue">Yes</span>'
+        : '<span style="color:#cbd5e1;">No</span>';
+
+    // 12: Assignee
+    if (task._assignee && task._assignee !== 'Unassigned') {
+        c[12].innerHTML = '<span class="badge badge-gray">' + escHtml(task._assignee) + '</span>';
+    } else {
+        c[12].innerHTML = '<span style="color:#cbd5e1;">Unassigned</span>';
     }
+
+    // 13: Age
+    const age = task._age || '';
+    let ageBadge = 'badge-gray';
+    if (age === '>90') ageBadge = 'badge-yellow';
+    else if (age === '60-90') ageBadge = 'badge-blue';
+    c[13].innerHTML = '<span class="badge ' + ageBadge + '">' + escHtml(age) + '</span>';
 }
 
 function updateGanttBar(task) {
@@ -435,29 +512,52 @@ function updateGanttBar(task) {
     }
 }
 
-// ---- Save ----
+// ---- Save (dirty-tracking) ----
+// Sends only fields whose value differs from the snapshot captured when
+// the panel rendered. Avoids overwriting concurrent edits and avoids
+// wasteful Odoo writes for fields the user didn't touch.
 function savePanel(e) {
     e.preventDefault();
     const form = document.getElementById('panelForm');
     const btn = document.getElementById('panelSaveBtn');
     const status = document.getElementById('panelSaveStatus');
-    const data = {};
-    new FormData(form).forEach((v, k) => { data[k] = v === 'true' ? true : v === 'false' ? false : v; });
+
+    const diff = {};
+    new FormData(form).forEach((v, k) => {
+        const current = normalizeFormValue(v);
+        const initial = panelOriginalValues[k];
+        if (current !== initial) {
+            diff[k] = current;
+        }
+    });
+
+    if (Object.keys(diff).length === 0) {
+        status.textContent = '✓ No changes';
+        status.style.color = '#64748b';
+        setTimeout(() => status.textContent = '', 2000);
+        return false;
+    }
+
     btn.disabled = true; btn.textContent = 'Saving...'; status.textContent = '';
 
-    fetch('/api/task/' + currentTaskId + '/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+    fetch('/api/task/' + currentTaskId + '/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(diff) })
         .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); }); return r.json(); })
         .then(() => {
             btn.disabled = false; btn.textContent = 'Save Changes';
-            status.textContent = '✓ Saved'; status.style.color = '#16a34a';
+            status.textContent = '✓ Saved (' + Object.keys(diff).length + ')';
+            status.style.color = '#16a34a';
             setTimeout(() => status.textContent = '', 2000);
 
-            // Fetch the updated task with recalculated score
+            // Pull the refreshed task back — score, related fields,
+            // and any Odoo-side recomputation are now reflected.
             return fetch('/api/task/' + currentTaskId).then(r => r.json());
         })
         .then(taskData => {
             if (taskData && taskData.task) {
                 onTaskUpdated(taskData.task);
+                // The form values we just saved are the new "initial" —
+                // capture them so further edits diff from this point.
+                capturePanelInitialValues();
             }
         })
         .catch(err => {
