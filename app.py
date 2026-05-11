@@ -316,6 +316,10 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
         proj = task.get("project_id")
         task["_project"] = proj[1] if isinstance(proj, (list, tuple)) and len(proj) > 1 else "No Project"
         task["_project_id"] = proj[0] if isinstance(proj, (list, tuple)) and len(proj) > 0 else 0
+        # Odoo Studio selection fields can have key != label (e.g. "Minor" key → "Non-critical Workflow Bug" label).
+        # Show the label, falling back to the raw key when no mapping exists.
+        issue_key = task.get("x_studio_issue_type")
+        task["_issue_type_label"] = (sel_labels or {}).get("x_studio_issue_type", {}).get(issue_key, issue_key) if issue_key else ""
     tasks.sort(key=lambda t: t["_score"])
     return tasks
 
@@ -487,6 +491,10 @@ def enrich_tickets(tickets: list, weight_map: dict, sel_labels: dict = None) -> 
         t["_score"] = score_task(t, weight_map, sel_labels)
         t["_age"] = compute_age_bracket(t.get("create_date", ""))
         t["_grooming"] = compute_grooming(t)
+        # helpdesk.ticket.x_studio_customer_impact uses the same key→label selection set
+        # as project.task.x_studio_issue_type — Bugzilla severity keys, descriptive labels.
+        issue_key = t.get("x_studio_issue_type")
+        t["_issue_type_label"] = (sel_labels or {}).get("x_studio_issue_type", {}).get(issue_key, issue_key) if issue_key else ""
         t["_stage"] = t["stage_id"][1] if isinstance(t.get("stage_id"), (list, tuple)) else ""
         t["_customer"] = ""
         cust = t.get("partner_id")

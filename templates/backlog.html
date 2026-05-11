@@ -231,7 +231,7 @@ function toggleBacklogHelp() {
                     {% elif 'Queued' in task._stage %}<span class="badge badge-blue">{{ task._stage }}</span>
                     {% else %}<span class="badge badge-gray">{{ task._stage }}</span>{% endif %}
                 </td>
-                <td style="font-size: 0.8rem;">{{ task.x_studio_issue_type or '' }}</td>
+                <td style="font-size: 0.8rem;">{{ task._issue_type_label or '' }}</td>
                 <td>{% if task.get('x_studio_related_field_5vi_1jnfmj9cf') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
                 <td>{% set funded = task.get('x_studio_related_field_gd_1jnftb4gl', '') %}{% if funded == 'Yes' %}<span class="badge badge-green">Yes</span>{% else %}<span style="color:#cbd5e1;">{{ funded or 'No' }}</span>{% endif %}</td>
                 <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
