@@ -197,6 +197,21 @@ async def no_cache_api(request: Request, call_next):
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
+# ---------------------------------------------------------------------------
+# SINGLE-WORKER ASSUMPTION
+# ---------------------------------------------------------------------------
+# The three module-level dicts below (active_users, _data_cache, and
+# _selection_labels_cache further down) are in-process state. They work
+# correctly only under a single worker process. The Procfile and
+# render.yaml pin --workers 1 for this reason. Before raising worker
+# count, move this state to shared storage (Redis, SQLite, etc.) or each
+# worker will:
+#   • show a different subset of online users (presence will flap),
+#   • miss caches that another worker just populated,
+#   • invalidate caches only in its own process on writes,
+# producing surprising "sometimes stale, sometimes fresh" symptoms.
+# Sized for the current internal use (6 users); revisit if that changes.
+
 # Active user presence: login → last_seen timestamp
 active_users: dict[str, float] = {}
 PRESENCE_TIMEOUT = 120  # seconds
@@ -510,7 +525,8 @@ def compute_age_bracket(create_date_str: str) -> str:
     return ">90"
 
 
-# Cache for selection field key→label mappings
+# Cache for selection field key→label mappings.
+# Module-level state — see the SINGLE-WORKER comment near `active_users`.
 _selection_labels_cache: dict | None = None
 
 
