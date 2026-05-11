@@ -2,6 +2,7 @@
 ACR Prioritization Engine — Standalone Web App
 Talks to Odoo via JSON-RPC. Auth via Odoo API keys.
 """
+import asyncio
 import json
 import logging
 import re
@@ -443,6 +444,9 @@ def load_attributes_for_config(uid: int, api_key: str) -> list:
 # ---------------------------------------------------------------------------
 # Odoo RPC helpers
 # ---------------------------------------------------------------------------
+# These remain synchronous so they can be called from each other and from
+# the pytest suite directly. Routes wrap them via `_odoo()` to keep the
+# event loop free during the XML-RPC round trip.
 def odoo_authenticate(login: str, api_key: str) -> int:
     common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
     uid = common.authenticate(ODOO_DB, login, api_key, {})
@@ -465,6 +469,28 @@ def odoo_write(uid: int, api_key: str, model: str, ids: list, values: dict):
     return models.execute_kw(
         ODOO_DB, uid, api_key, model, "write", [ids, values],
     )
+
+
+def odoo_message_post(uid: int, api_key: str, model: str, record_id: int, body: str):
+    models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+    return models.execute_kw(
+        ODOO_DB, uid, api_key, model, "message_post", [record_id],
+        {"body": body, "message_type": "comment", "subtype_xmlid": "mail.mt_comment"},
+    )
+
+
+def odoo_fields_get(uid: int, api_key: str, model: str, field_names: list, attributes: list):
+    models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+    return models.execute_kw(
+        ODOO_DB, uid, api_key, model, "fields_get",
+        [field_names], {"attributes": attributes},
+    )
+
+
+async def _odoo(fn, *args, **kwargs):
+    """Run a blocking Odoo helper in the thread pool so the event loop
+    stays free during the XML-RPC round trip."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -689,7 +715,7 @@ async def login_page(request: Request):
 @app.post("/login")
 async def login_submit(request: Request, login: str = Form(...), api_key: str = Form(...)):
     try:
-        uid = odoo_authenticate(login, api_key)
+        uid = await _odoo(odoo_authenticate, login, api_key)
     except Exception:
         return RedirectResponse("/login?error=Authentication+failed.+Check+your+email+and+API+key.", status_code=303)
     request.session["uid"] = uid
@@ -778,21 +804,21 @@ async def backlog(request: Request):
 
     view_mode = request.query_params.get("view", "tasks")
 
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
 
     items = []
 
     if view_mode == "tasks":
-        tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
+        tasks = await _odoo(get_open_tasks_cached, creds["uid"], creds["api_key"])
         tasks = [dict(t) for t in tasks]
         tasks = enrich_tasks(tasks, weight_map, sel_labels)
-        resolve_user_names(tasks, creds["uid"], creds["api_key"])
+        await _odoo(resolve_user_names, tasks, creds["uid"], creds["api_key"])
         for t in tasks:
             t["_item_type"] = "task"
         items = tasks
     else:
-        tickets = get_open_tickets_cached(creds["uid"], creds["api_key"])
+        tickets = await _odoo(get_open_tickets_cached, creds["uid"], creds["api_key"])
         tickets = [dict(t) for t in tickets]
         tickets = enrich_tickets(tickets, weight_map, sel_labels)
         items = tickets
@@ -822,12 +848,12 @@ async def gantt_page(request: Request):
 
     # Pull open tasks with date fields (cached)
     gantt_extra = ["planned_date_begin", "date_end", "date_deadline", "user_ids", "project_id", "parent_id"]
-    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"], extra_fields=gantt_extra)
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    tasks = await _odoo(get_open_tasks_cached, creds["uid"], creds["api_key"], extra_fields=gantt_extra)
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
     tasks = [dict(t) for t in tasks]
     tasks = enrich_tasks(tasks, weight_map, sel_labels)
-    resolve_user_names(tasks, creds["uid"], creds["api_key"])
+    await _odoo(resolve_user_names, tasks, creds["uid"], creds["api_key"])
 
     # Default dates for gantt
     today = date.today().isoformat()
@@ -888,9 +914,9 @@ async def api_recalculate_scores(request: Request):
     # Clear all caches to force fresh data
     cache_clear(creds["uid"])
 
-    tasks = get_open_tasks_cached(creds["uid"], creds["api_key"])
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    tasks = await _odoo(get_open_tasks_cached, creds["uid"], creds["api_key"])
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
 
     scored_tasks = []
     scores = {}
@@ -929,7 +955,7 @@ async def api_update_task_dates(request: Request, task_id: int):
         return {"ok": True}
 
     try:
-        odoo_write(creds["uid"], creds["api_key"], "project.task", [task_id], values)
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], "project.task", [task_id], values)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -945,7 +971,7 @@ async def config_page(request: Request):
     if not creds:
         return RedirectResponse("/login", status_code=303)
 
-    attributes = load_attributes_for_config(creds["uid"], creds["api_key"])
+    attributes = await _odoo(load_attributes_for_config, creds["uid"], creds["api_key"])
 
     return templates.TemplateResponse(request, "config.html", {
         "attributes": attributes,
@@ -960,8 +986,8 @@ async def update_weight(request: Request, weight_id: int, weight: int = Form(...
         return RedirectResponse("/login", status_code=303)
 
     try:
-        odoo_write(creds["uid"], creds["api_key"], WEIGHT_MODEL, [weight_id],
-                   {"x_weight": weight})
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], WEIGHT_MODEL,
+                    [weight_id], {"x_weight": weight})
     except Exception as e:
         return RedirectResponse(f"/config?error={str(e)}", status_code=303)
 
@@ -980,37 +1006,40 @@ async def api_options(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Fetch stages
-    stages = odoo_search_read(
+    stages = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "project.task.type",
-        [], ["name"], limit=100,
+        [], ["name"], 100,
     )
 
     # Fetch customers (partners used as x_studio_customer)
-    customers = odoo_search_read(
+    customers = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "res.partner",
-        [("customer_rank", ">", 0)], ["name"], limit=200,
+        [("customer_rank", ">", 0)], ["name"], 200,
     )
     # If no customer_rank results, try getting all companies
     if not customers:
-        customers = odoo_search_read(
+        customers = await _odoo(
+            odoo_search_read,
             creds["uid"], creds["api_key"], "res.partner",
-            [("is_company", "=", True)], ["name"], limit=200,
+            [("is_company", "=", True)], ["name"], 200,
         )
 
     # Selection field values from the Odoo field definitions
-    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-    field_defs = models_proxy.execute_kw(
-        ODOO_DB, creds["uid"], creds["api_key"],
-        "project.task", "fields_get",
-        [["x_studio_issue_type", "x_studio_level_of_effort",
-          "x_studio_related_field_gd_1jnftb4gl", "priority"]],
-        {"attributes": ["selection"]},
+    field_defs = await _odoo(
+        odoo_fields_get,
+        creds["uid"], creds["api_key"], "project.task",
+        ["x_studio_issue_type", "x_studio_level_of_effort",
+         "x_studio_related_field_gd_1jnftb4gl", "priority"],
+        ["selection"],
     )
 
     # Fetch users (assignees)
-    users = odoo_search_read(
+    users = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "res.users",
-        [("share", "=", False)], ["name"], limit=200,
+        [("share", "=", False)], ["name"], 200,
     )
 
     return {
@@ -1111,7 +1140,8 @@ async def update_task(request: Request, task_id: int):
     # Write task fields
     if task_values:
         try:
-            odoo_write(creds["uid"], creds["api_key"], "project.task", [task_id], task_values)
+            await _odoo(odoo_write, creds["uid"], creds["api_key"], "project.task",
+                        [task_id], task_values)
             updated += len(task_values)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Task update failed: {e}")
@@ -1119,11 +1149,11 @@ async def update_task(request: Request, task_id: int):
     # Write ticket fields (if there's a linked ticket)
     if ticket_values:
         # Look up the linked helpdesk ticket
-        task_rec = odoo_search_read(
+        task_rec = await _odoo(
+            odoo_search_read,
             creds["uid"], creds["api_key"], "project.task",
             [("id", "=", task_id)],
-            ["helpdesk_ticket_id"],
-            limit=1,
+            ["helpdesk_ticket_id"], 1,
         )
         ticket_id_link = None
         if task_rec and task_rec[0].get("helpdesk_ticket_id"):
@@ -1132,8 +1162,8 @@ async def update_task(request: Request, task_id: int):
 
         if ticket_id_link:
             try:
-                odoo_write(creds["uid"], creds["api_key"], "helpdesk.ticket",
-                           [ticket_id_link], ticket_values)
+                await _odoo(odoo_write, creds["uid"], creds["api_key"], "helpdesk.ticket",
+                            [ticket_id_link], ticket_values)
                 updated += len(ticket_values)
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Ticket update failed: {e}")
@@ -1166,11 +1196,11 @@ async def api_task_detail(request: Request, task_id: int):
         "helpdesk_ticket_id",
     ]
 
-    tasks = odoo_search_read(
+    tasks = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "project.task",
         [("id", "=", task_id)],
-        detail_fields,
-        limit=1,
+        detail_fields, 1,
     )
 
     if not tasks:
@@ -1179,7 +1209,8 @@ async def api_task_detail(request: Request, task_id: int):
     task = tasks[0]
 
     # Fetch chatter messages (mail.message)
-    messages = odoo_search_read(
+    messages = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "mail.message",
         [
             ("res_id", "=", task_id),
@@ -1188,7 +1219,6 @@ async def api_task_detail(request: Request, task_id: int):
         ],
         ["body", "date", "author_id", "message_type", "subtype_id",
          "attachment_ids"],
-        limit=0,
     )
 
     # Sort messages newest first
@@ -1201,7 +1231,8 @@ async def api_task_detail(request: Request, task_id: int):
 
     attachments = {}
     if all_attachment_ids:
-        att_records = odoo_search_read(
+        att_records = await _odoo(
+            odoo_search_read,
             creds["uid"], creds["api_key"], "ir.attachment",
             [("id", "in", all_attachment_ids)],
             ["name", "mimetype", "file_size"],
@@ -1225,10 +1256,10 @@ async def api_task_detail(request: Request, task_id: int):
 
     # Enrich the task using the same code path as the backlog so the
     # post-save row repaint has every field it needs.
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
     enriched = enrich_tasks([task], weight_map, sel_labels)
-    resolve_user_names(enriched, creds["uid"], creds["api_key"])
+    await _odoo(resolve_user_names, enriched, creds["uid"], creds["api_key"])
     task = enriched[0]
     task["description"] = sanitize_html(task.get("description"))
 
@@ -1245,11 +1276,11 @@ async def api_ticket_detail(request: Request, ticket_id: int):
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    tickets = odoo_search_read(
+    tickets = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "helpdesk.ticket",
         [("id", "=", ticket_id)],
-        TICKET_FIELDS + ["description"],
-        limit=1,
+        TICKET_FIELDS + ["description"], 1,
     )
 
     if not tickets:
@@ -1258,8 +1289,8 @@ async def api_ticket_detail(request: Request, ticket_id: int):
     ticket = tickets[0]
 
     # Score
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
     # Map to scoring field names
     t = dict(ticket)
     t["x_studio_issue_type"] = t.get("x_studio_customer_impact", False)
@@ -1272,12 +1303,12 @@ async def api_ticket_detail(request: Request, ticket_id: int):
     ticket["_score"] = score_task(t, weight_map, sel_labels)
 
     # Messages
-    messages = odoo_search_read(
+    messages = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "mail.message",
         [("res_id", "=", ticket_id), ("model", "=", "helpdesk.ticket"),
          ("message_type", "in", ["comment", "email", "notification"])],
         ["body", "date", "author_id", "message_type", "subtype_id"],
-        limit=0,
     )
     messages.sort(key=lambda m: m.get("date", ""), reverse=True)
     for msg in messages:
@@ -1298,12 +1329,12 @@ async def api_project_detail(request: Request, project_id: int):
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    projects = odoo_search_read(
+    projects = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "project.project",
         [("id", "=", project_id)],
         ["name", "user_id", "partner_id", "date_start", "date",
-         "task_count", "description"],
-        limit=1,
+         "task_count", "description"], 1,
     )
 
     if not projects:
@@ -1312,7 +1343,8 @@ async def api_project_detail(request: Request, project_id: int):
     project = projects[0]
 
     # Get open tasks in this project
-    tasks = odoo_search_read(
+    tasks = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "project.task",
         [("project_id", "=", project_id),
          ("stage_id.name", "not in", list(EXCLUDED_STAGES))],
@@ -1320,8 +1352,8 @@ async def api_project_detail(request: Request, project_id: int):
          "x_studio_level_of_effort", "create_date"],
     )
 
-    weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-    sel_labels = get_sel_labels_cached(creds["uid"], creds["api_key"])
+    weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+    sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
 
     for t in tasks:
         t["_score"] = score_task(t, weight_map, sel_labels)
@@ -1347,20 +1379,10 @@ async def api_post_task_comment(request: Request, task_id: int):
 
     # Treat the user's input as plain text — escape HTML, then add <br/>
     # for line breaks. Prevents stored XSS via comment field.
-    
     html_body = html_escape(body).replace("\n", "<br/>")
 
-    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-    models_proxy.execute_kw(
-        ODOO_DB, creds["uid"], creds["api_key"],
-        "project.task", "message_post", [task_id],
-        {
-            "body": html_body,
-            "message_type": "comment",
-            "subtype_xmlid": "mail.mt_comment",
-        },
-    )
-
+    await _odoo(odoo_message_post, creds["uid"], creds["api_key"],
+                "project.task", task_id, html_body)
     return {"ok": True}
 
 
@@ -1376,20 +1398,10 @@ async def api_post_ticket_comment(request: Request, ticket_id: int):
     if not body:
         raise HTTPException(status_code=400, detail="Comment body is required")
 
-    
     html_body = html_escape(body).replace("\n", "<br/>")
 
-    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-    models_proxy.execute_kw(
-        ODOO_DB, creds["uid"], creds["api_key"],
-        "helpdesk.ticket", "message_post", [ticket_id],
-        {
-            "body": html_body,
-            "message_type": "comment",
-            "subtype_xmlid": "mail.mt_comment",
-        },
-    )
-
+    await _odoo(odoo_message_post, creds["uid"], creds["api_key"],
+                "helpdesk.ticket", ticket_id, html_body)
     return {"ok": True}
 
 
@@ -1418,8 +1430,8 @@ async def api_bulk_update(request: Request):
         raise HTTPException(status_code=400, detail="task_ids and at least one field required")
 
     try:
-        odoo_write(creds["uid"], creds["api_key"], "project.task",
-                   [int(t) for t in task_ids], values)
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], "project.task",
+                    [int(t) for t in task_ids], values)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1442,8 +1454,8 @@ async def api_update_ticket_status(request: Request, ticket_id: int):
         raise HTTPException(status_code=400, detail="stage_id is required")
 
     try:
-        odoo_write(creds["uid"], creds["api_key"], "helpdesk.ticket",
-                   [ticket_id], {"stage_id": int(stage_id)})
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], "helpdesk.ticket",
+                    [ticket_id], {"stage_id": int(stage_id)})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1459,12 +1471,12 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Find the helpdesk ticket by ticket_ref
-    tickets = odoo_search_read(
+    tickets = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "helpdesk.ticket",
         [("ticket_ref", "=", ticket_ref)],
         ["id", "name", "ticket_ref", "stage_id", "create_date",
-         "partner_id", "user_id", "description", "priority"],
-        limit=1,
+         "partner_id", "user_id", "description", "priority"], 1,
     )
 
     if not tickets:
@@ -1474,22 +1486,23 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
 
     # Also try to find a linked project.task
     task_data = None
-    tasks = odoo_search_read(
+    tasks = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "project.task",
         [("helpdesk_ticket_id", "=", ticket["id"])],
         TASK_FIELDS + ["description", "date_deadline", "date_assign",
-                       "allocated_hours", "effective_hours"],
-        limit=1,
+                       "allocated_hours", "effective_hours"], 1,
     )
     if tasks:
         task_data = tasks[0]
-        weight_map = get_weight_map_cached(creds["uid"], creds["api_key"])
-        sel_labels_lookup = get_sel_labels_cached(creds["uid"], creds["api_key"])
+        weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
+        sel_labels_lookup = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
         task_data["_score"] = score_task(task_data, weight_map, sel_labels_lookup)
         task_data["_age"] = compute_age_bracket(task_data.get("create_date", ""))
 
     # Fetch chatter messages from the helpdesk ticket
-    messages = odoo_search_read(
+    messages = await _odoo(
+        odoo_search_read,
         creds["uid"], creds["api_key"], "mail.message",
         [
             ("res_id", "=", ticket["id"]),
@@ -1497,8 +1510,7 @@ async def api_ticket_lookup(request: Request, ticket_ref: str):
             ("message_type", "in", ["comment", "email", "notification"]),
         ],
         ["body", "date", "author_id", "message_type", "subtype_id",
-         "attachment_ids"],
-        limit=50,
+         "attachment_ids"], 50,
     )
 
     messages.sort(key=lambda m: m.get("date", ""), reverse=True)
