@@ -23,9 +23,67 @@ from starlette.middleware.sessions import SessionMiddleware
 # App setup
 # ---------------------------------------------------------------------------
 import os
+from urllib.parse import urlparse
+
+from fastapi.responses import JSONResponse
+
+_DEV_SECRET = "acr-priority-dev-secret-change-in-prod"
+SECRET_KEY = (os.environ.get("SECRET_KEY") or "").strip()
+if not SECRET_KEY or SECRET_KEY == _DEV_SECRET:
+    raise RuntimeError(
+        "SECRET_KEY env var is missing or set to the legacy dev default. "
+        "Generate a secure value and set it in the environment:\n"
+        "    python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    )
+
+# Origins permitted to issue state-changing requests (CSRF defense).
+# Comma-separated. Production must set this explicitly via env.
+ALLOWED_ORIGINS = {
+    o.strip().rstrip("/")
+    for o in os.environ.get(
+        "ACR_ALLOWED_ORIGINS",
+        "http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",")
+    if o.strip()
+}
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+# Cookie hardening: require HTTPS in production (auto-detected when an
+# https origin is in the allowlist).
+_HTTPS_ONLY = any(o.startswith("https://") for o in ALLOWED_ORIGINS)
 
 app = FastAPI(title="ACR Prioritization Engine")
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "acr-priority-dev-secret-change-in-prod"))
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    same_site="lax",
+    https_only=_HTTPS_ONLY,
+)
+
+
+@app.middleware("http")
+async def enforce_csrf_origin(request: Request, call_next):
+    """Reject state-changing requests whose Origin/Referer isn't allowlisted.
+
+    Sufficient CSRF defense for a session-cookie auth model: browsers
+    always attach Origin (and usually Referer) to cross-origin POSTs,
+    and an attacker site cannot forge those headers from JS.
+    """
+    if request.method in _UNSAFE_METHODS:
+        source = (request.headers.get("origin") or "").rstrip("/")
+        if not source:
+            ref = request.headers.get("referer", "")
+            if ref:
+                p = urlparse(ref)
+                source = f"{p.scheme}://{p.netloc}".rstrip("/")
+        if source not in ALLOWED_ORIGINS:
+            return JSONResponse(
+                {"detail": "Origin not allowed"},
+                status_code=403,
+            )
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
