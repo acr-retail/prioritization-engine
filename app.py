@@ -579,13 +579,11 @@ def get_selection_labels(uid: int, api_key: str) -> dict:
     if _selection_labels_cache is not None:
         return _selection_labels_cache
 
-    models_proxy = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-    field_defs = models_proxy.execute_kw(
-        ODOO_DB, uid, api_key,
-        "project.task", "fields_get",
-        [["x_studio_issue_type", "x_studio_level_of_effort",
-          "x_studio_related_field_gd_1jnftb4gl"]],
-        {"attributes": ["selection"]},
+    field_defs = odoo_fields_get(
+        uid, api_key, "project.task",
+        ["x_studio_issue_type", "x_studio_level_of_effort",
+         "x_studio_related_field_gd_1jnftb4gl"],
+        ["selection"],
     )
 
     result = {}
