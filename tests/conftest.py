@@ -103,6 +103,7 @@ _TICKETS = [
         "create_date": "2026-04-01 09:00:00",
         "user_id": [1297, "Andrew Temple"],
         "partner_id": [9, "Schnuck Markets, Inc."],
+        "tag_ids": [50],  # "Customer Reported" (helpdesk.tag)
         "x_studio_customer_impact": "Minor",
         "x_studio_customer_funded": "Yes",
         "x_studio_escalated": False,
@@ -136,6 +137,14 @@ _TAGS = [
     {"id": 2, "name": "Enhancement"},
     {"id": 3, "name": "Development Task"},
     {"id": 4, "name": "Roadmap"},
+]
+
+# helpdesk.tag is a separate namespace from project.tags. In the real
+# Odoo it's currently empty — we seed a couple here so tests can
+# exercise the helpdesk-side flow.
+_HELPDESK_TAGS = [
+    {"id": 50, "name": "Customer Reported"},
+    {"id": 51, "name": "Internal Triage"},
 ]
 
 _PROJECTS = [
@@ -216,6 +225,7 @@ class FakeOdoo:
         self.stages = {s["id"]: deepcopy(s) for s in _STAGES}
         self.projects = {p["id"]: deepcopy(p) for p in _PROJECTS}
         self.tags = {t["id"]: deepcopy(t) for t in _TAGS}
+        self.helpdesk_tags = {t["id"]: deepcopy(t) for t in _HELPDESK_TAGS}
         self.messages = list(deepcopy(_MESSAGES))
         self.attrs = list(deepcopy(_PRIORITY_ATTRS))
         self.weights = list(deepcopy(_PRIORITY_WEIGHTS))
@@ -246,6 +256,7 @@ class FakeOdoo:
             "project.task.type": list(self.stages.values()),
             "project.project": list(self.projects.values()),
             "project.tags": list(self.tags.values()),
+            "helpdesk.tag": list(self.helpdesk_tags.values()),
             "mail.message": self.messages,
             "x_acr_priority_attribute": self.attrs,
             "x_acr_priority_weight": self.weights,

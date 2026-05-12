@@ -79,38 +79,88 @@ function openTicketPanel(ticketId) {
 }
 
 function renderTicketPanel(ticket, messages) {
+    currentTaskId = ticket.id;
     const opts = fieldOptions || {};
 
     const score = ticket._score || 0;
     document.getElementById('panelScore').innerHTML =
         '<span class="score ' + getScoreClass(score) + '">' + score + '</span>' +
-        '<span style="color:#64748b;font-size:0.85rem;">Priority Score</span>';
+        '<span style="color:#64748b;font-size:0.85rem;">Priority Score — lower is more urgent</span>';
 
-    let html = '<div class="panel-field"><div class="panel-field-label">Title</div>' +
-        '<div class="panel-field-value">' + escHtml(ticket.name || '') + '</div></div>';
+    // Use the same panelForm id + data-attributes that savePanel reads
+    // so the dirty-tracking save logic works for tickets out of the box.
+    let html = '<form id="panelForm" onsubmit="return savePanel(event)"' +
+        ' data-save-url="/api/ticket/' + ticket.id + '/update"' +
+        ' data-refetch-url="/api/ticket/detail/' + ticket.id + '"' +
+        ' data-item-key="ticket">';
 
-    const stage = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[1] : ticket.stage_id) : '—';
-    const customer = ticket.partner_id ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[1] : ticket.partner_id) : '—';
-    const assignee = ticket.user_id ? (Array.isArray(ticket.user_id) ? ticket.user_id[1] : ticket.user_id) : '—';
+    html += '<div class="panel-field"><label class="panel-field-label" for="panel-field-name">Title</label>' +
+        '<input id="panel-field-name" type="text" name="name" value="' + escAttr(ticket.name || '') + '" class="panel-input"></div>';
 
     html += '<div class="panel-grid">';
-    html += panelReadonly('Status', stage, 'Current ticket stage.');
-    html += panelReadonly('Customer', customer, 'The customer this ticket is for.');
-    html += panelReadonly('Assignee', assignee, 'Who is handling this ticket.');
-    html += panelReadonly('Issue Type', ticket.x_studio_customer_impact || '—', 'Classification of the issue.');
-    html += panelReadonly('Escalated', ticket.x_studio_escalated ? 'Yes' : 'No', 'Whether this ticket has been escalated.');
-    html += panelReadonly('Customer Funded', ticket.x_studio_customer_funded || '—', 'Whether the customer is paying for this.');
-    html += panelReadonly('Paid Prioritization', ticket.x_studio_paid_prioritization ? 'Yes' : 'No', 'Whether paid priority was requested.');
+
+    // Status
+    const stageId = ticket.stage_id ? (Array.isArray(ticket.stage_id) ? ticket.stage_id[0] : ticket.stage_id) : '';
+    html += panelSelect('Status', 'stage_id', stageId, opts.stages || [], 'id', 'name',
+        'Current ticket stage.');
+
+    // Assignee — single user_id on helpdesk.ticket (not many2many like tasks)
+    const assigneeId = ticket.user_id
+        ? (Array.isArray(ticket.user_id) ? ticket.user_id[0] : ticket.user_id) : '';
+    html += panelSelect('Assignee', 'user_id', assigneeId, opts.users || [], 'id', 'name',
+        'Who is handling this ticket.');
+
+    // Customer — partner_id on helpdesk.ticket; the frontend keeps the
+    // task-side field name x_studio_customer to share save logic
+    const custId = ticket.partner_id
+        ? (Array.isArray(ticket.partner_id) ? ticket.partner_id[0] : ticket.partner_id) : '';
+    html += panelSelect('Customer', 'x_studio_customer', custId, opts.customers || [], 'id', 'name',
+        'The customer this ticket is for. Affects priority score.');
+
+    // Issue Type — backend remaps to x_studio_customer_impact
+    html += panelSelect('Issue Type', 'x_studio_issue_type', ticket.x_studio_customer_impact || '',
+        opts.issue_types || [], 'value', 'label',
+        'Classification of the issue. System-stopping bugs score highest priority.');
+
+    // Escalated — backend remaps to x_studio_escalated
+    html += panelBool('Escalated', 'x_studio_related_field_5vi_1jnfmj9cf', ticket.x_studio_escalated,
+        'Escalated tickets receive a higher priority score.');
+
+    // Customer Funded — backend remaps to x_studio_customer_funded
+    html += panelSelect('Customer Funded', 'x_studio_related_field_gd_1jnftb4gl',
+        ticket.x_studio_customer_funded || '', opts.customer_funded || [], 'value', 'label',
+        'Customer-funded items are boosted in priority.');
+
+    // Paid Prioritization — backend remaps to x_studio_paid_prioritization
+    html += panelBool('Paid Prioritization', 'x_studio_related_field_27d_1jnftbs3p',
+        ticket.x_studio_paid_prioritization,
+        'Paid items receive the highest priority boost.');
+
+    html += panelSelect('Priority', 'priority', ticket.priority || '0', opts.priorities || [], 'value', 'label',
+        'Odoo priority level.');
+
     html += panelReadonly('Ticket Ref', ticket.ticket_ref || '—', 'Bugzilla ticket number.');
-    html += panelReadonly('Created', ticket.create_date ? ticket.create_date.slice(0, 10) : '—', 'Date created.');
+    html += panelReadonly('Created', ticket.create_date ? ticket.create_date.slice(0, 10) : '—',
+        'Date the ticket was created.');
+    html += panelReadonly('Age', ticket._age || '—',
+        'Days since creation. Older items score higher priority.');
     html += '</div>';
 
-    // Description
-    if (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false) {
-        html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;">' +
-            '<div class="panel-field-label">Description</div>' +
-            '<div style="font-size:0.85rem;color:#374151;line-height:1.6;">' + ticket.description + '</div></div>';
-    }
+    html += '<div style="margin-top:1.25rem;display:flex;gap:0.75rem;">' +
+        '<button type="submit" class="btn btn-primary" id="panelSaveBtn">Save Changes</button>' +
+        '<span id="panelSaveStatus" style="font-size:0.8rem;color:#16a34a;align-self:center;"></span></div>';
+    html += '</form>';
+
+    // Tag editor — sourced from the helpdesk_tags options bucket (which
+    // is separate from project.tags on the task side). Reuses the same
+    // renderTagEditor helper but passes the helpdesk-namespace tag list.
+    html += renderTagEditor(ticket, 'helpdesk_tags');
+
+    // Description — always show full content
+    html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #e2e8f0;"><div class="panel-field-label">Description</div>' +
+        '<div style="font-size:0.85rem;color:#374151;line-height:1.6;">' +
+        (ticket.description && ticket.description !== '<p><br></p>' && ticket.description !== false ? ticket.description : '<span style="color:#94a3b8;">No description</span>') +
+        '</div></div>';
 
     // Messages
     const msgCount = messages ? messages.length : 0;
@@ -134,6 +184,7 @@ function renderTicketPanel(ticket, messages) {
         'class="btn btn-ghost" style="width:100%;justify-content:center;">Open Ticket in Odoo →</a></div>';
 
     document.getElementById('panelBody').innerHTML = html;
+    capturePanelInitialValues();
 }
 
 function openProjectPanel(projectId) {
@@ -378,18 +429,22 @@ function panelReadonly(label, val, tip) {
 // Renders the current tags as removable chips + an "Add tag" dropdown.
 // A hidden input named `tag_ids` (comma-separated) is the canonical form
 // value that dirty-tracking diffs against.
-function renderTagEditor(task) {
+// optionsKey: which fieldOptions bucket holds the candidate tags
+//   - 'tags' (default) → project.tags, used on the task panel
+//   - 'helpdesk_tags' → helpdesk.tag, used on the ticket panel
+function renderTagEditor(task, optionsKey) {
+    const bucket = optionsKey || 'tags';
     const tags = task._tags || [];
     const currentIds = tags.map(t => String(t.id));
     let h = '<div class="panel-field" style="margin-top:1rem;">' +
-        '<label class="panel-field-label" for="tagAddSelect">Tags' + tipHtml('Categorize this task. Affects backlog filtering.') + '</label>' +
+        '<label class="panel-field-label" for="tagAddSelect">Tags' + tipHtml('Categorize this item. Affects backlog filtering.') + '</label>' +
         '<input type="hidden" name="tag_ids" value="' + escAttr(currentIds.join(',')) + '">' +
         '<div id="tagChips" role="list" aria-label="Current tags" style="display:flex;flex-wrap:wrap;gap:0.25rem;margin-bottom:0.5rem;min-height:1.5rem;">';
     tags.forEach(t => { h += renderTagChipHtml(t.id, t.name); });
     h += '</div>' +
         '<select id="tagAddSelect" class="panel-input" onchange="addTagFromSelect()" aria-label="Add a tag">' +
         '<option value="">+ Add tag…</option>';
-    (fieldOptions?.tags || []).forEach(t => {
+    (fieldOptions?.[bucket] || []).forEach(t => {
         h += '<option value="' + t.id + '" data-name="' + escAttr(t.name) + '">' + escHtml(t.name) + '</option>';
     });
     h += '</select></div>';
@@ -666,6 +721,15 @@ function savePanel(e) {
     const btn = document.getElementById('panelSaveBtn');
     const status = document.getElementById('panelSaveStatus');
 
+    // The panel form carries data-attributes telling savePanel where to
+    // POST and where to refetch from. This lets the same save logic
+    // serve both task panels (api/task/...) and ticket panels (api/ticket/...).
+    const saveUrl = form.dataset.saveUrl || ('/api/task/' + currentTaskId + '/update');
+    const refetchUrl = form.dataset.refetchUrl || ('/api/task/' + currentTaskId);
+    // The refetch response wraps the item under different keys for tasks
+    // ({task: ...}) vs tickets ({ticket: ...}).
+    const itemKey = form.dataset.itemKey || 'task';
+
     const diff = {};
     new FormData(form).forEach((v, k) => {
         const current = normalizeFormValue(v);
@@ -684,7 +748,7 @@ function savePanel(e) {
 
     btn.disabled = true; btn.textContent = 'Saving...'; status.textContent = '';
 
-    fetch('/api/task/' + currentTaskId + '/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(diff) })
+    fetch(saveUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(diff) })
         .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed'); }); return r.json(); })
         .then(() => {
             btn.disabled = false; btn.textContent = 'Save Changes';
@@ -692,19 +756,17 @@ function savePanel(e) {
             status.style.color = '#16a34a';
             setTimeout(() => status.textContent = '', 2000);
 
-            // Pull the refreshed task back — score, related fields,
-            // and any Odoo-side recomputation are now reflected.
-            // `cache: 'no-cache'` forces revalidation even if a browser
-            // heuristically cached the prior GET (belt-and-suspenders
-            // alongside the server's Cache-Control: no-store header).
-            return fetch('/api/task/' + currentTaskId, { cache: 'no-cache' })
+            // Pull the refreshed record back so the row repaint reflects
+            // any server-side recomputation (score, related-field mirroring,
+            // etc.). `cache: 'no-cache'` is belt-and-suspenders against
+            // any browser that ignores the server's Cache-Control: no-store.
+            return fetch(refetchUrl, { cache: 'no-cache' })
                 .then(r => r.json());
         })
         .then(taskData => {
-            if (taskData && taskData.task) {
-                onTaskUpdated(taskData.task);
-                // The form values we just saved are the new "initial" —
-                // capture them so further edits diff from this point.
+            const item = taskData && taskData[itemKey];
+            if (item) {
+                onTaskUpdated(item);
                 capturePanelInitialValues();
             } else {
                 console.warn('Post-save fetch returned unexpected shape', taskData);

@@ -793,20 +793,27 @@ def resolve_user_names(tasks: list, uid: int, api_key: str):
             t["_assignee_id"] = 0
 
 
-def resolve_tag_names(tasks: list, uid: int, api_key: str):
-    """Add _tags (list of {id,name}) to each task by resolving tag_ids
-    via project.tags. Fetches the full tag catalog (small — 4 tags in
-    practice) once per user and caches it, so a tag freshly assigned
-    via the panel doesn't render as its raw ID until cache TTL."""
-    tag_names = cache_get(uid, "tag_names")
-    if tag_names is None:
-        rows = odoo_search_read(uid, api_key, "project.tags", [], ["name"])
-        tag_names = {r["id"]: r["name"] for r in rows}
-        cache_set(uid, "tag_names", tag_names)
+def resolve_tag_names(items: list, uid: int, api_key: str,
+                      tag_model: str = "project.tags",
+                      cache_key: str = "tag_names"):
+    """Add _tags (list of {id,name}) to each item by resolving tag_ids
+    via the given Odoo tag model. Fetches the full tag catalog (small
+    — 4 tags in practice for project.tags) once per user and caches it,
+    so a tag freshly assigned via the panel doesn't render as its raw
+    ID until cache TTL.
 
-    for t in tasks:
-        ids = t.get("tag_ids", []) or []
-        t["_tags"] = [
+    Default args preserve the original task-side behavior. Helpdesk
+    callers pass tag_model="helpdesk.tag", cache_key="helpdesk_tag_names".
+    """
+    tag_names = cache_get(uid, cache_key)
+    if tag_names is None:
+        rows = odoo_search_read(uid, api_key, tag_model, [], ["name"])
+        tag_names = {r["id"]: r["name"] for r in rows}
+        cache_set(uid, cache_key, tag_names)
+
+    for it in items:
+        ids = it.get("tag_ids", []) or []
+        it["_tags"] = [
             {"id": tid, "name": tag_names.get(tid, str(tid))}
             for tid in ids if isinstance(tid, int)
         ]
@@ -930,6 +937,8 @@ async def logout(request: Request):
 TICKET_FIELDS = [
     "id", "name", "stage_id", "create_date", "user_id",
     "partner_id", "ticket_ref",
+    "tag_ids",                            # helpdesk.tag many2many
+    "priority",
     "x_studio_customer_impact",
     "x_studio_customer_funded",
     "x_studio_escalated",
@@ -1019,6 +1028,8 @@ async def backlog(request: Request):
         tickets = await _odoo(get_open_tickets_cached, creds["uid"], creds["api_key"])
         tickets = [dict(t) for t in tickets]
         tickets = enrich_tickets(tickets, weight_map, sel_labels)
+        await _odoo(resolve_tag_names, tickets, creds["uid"], creds["api_key"],
+                    "helpdesk.tag", "helpdesk_tag_names")
         items = tickets
 
     items.sort(key=lambda t: t.get("_score", 0))
@@ -1248,11 +1259,21 @@ async def api_options(request: Request):
         [], ["name"], 100,
     )
 
+    # Fetch helpdesk tags — separate model from project.tags, populated
+    # independently. Empty today in this Odoo, but plumbing is in place
+    # so the moment tickets get tagged the filter picks it up.
+    helpdesk_tags = await _odoo(
+        odoo_search_read,
+        creds["uid"], creds["api_key"], "helpdesk.tag",
+        [], ["name"], 100,
+    )
+
     return {
         "stages": [{"id": s["id"], "name": s["name"]} for s in stages],
         "customers": [{"id": c["id"], "name": c["name"]} for c in customers],
         "users": [{"id": u["id"], "name": u["name"]} for u in users],
         "tags": [{"id": t["id"], "name": t["name"]} for t in tags],
+        "helpdesk_tags": [{"id": t["id"], "name": t["name"]} for t in helpdesk_tags],
         "issue_types": [
             {"value": s[0], "label": s[1]}
             for s in field_defs.get("x_studio_issue_type", {}).get("selection", [])
@@ -1478,21 +1499,17 @@ async def api_ticket_detail(request: Request, ticket_id: int):
     if not tickets:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
-    ticket = tickets[0]
-
-    # Score
+    # Run the single ticket through the same enrichment pipeline the
+    # backlog uses so the response shape matches api_task_detail. That
+    # lets updateBacklogRow() on the frontend repaint ticket rows
+    # without branching on item_type.
     weight_map = await _odoo(get_weight_map_cached, creds["uid"], creds["api_key"])
     sel_labels = await _odoo(get_sel_labels_cached, creds["uid"], creds["api_key"])
-    # Map to scoring field names
-    t = dict(ticket)
-    t["x_studio_issue_type"] = t.get("x_studio_customer_impact", False)
-    t["x_studio_related_field_gd_1jnftb4gl"] = t.get("x_studio_customer_funded", False)
-    t["x_studio_related_field_5vi_1jnfmj9cf"] = t.get("x_studio_escalated", False)
-    t["x_studio_related_field_27d_1jnftbs3p"] = t.get("x_studio_paid_prioritization", False)
-    t["x_studio_customer"] = t.get("partner_id", False)
-    t["x_studio_level_of_effort"] = False
-    t["x_studio_road_map_flag"] = False
-    ticket["_score"] = score_task(t, weight_map, sel_labels)
+    enriched = enrich_tickets(tickets, weight_map, sel_labels)
+    await _odoo(resolve_tag_names, enriched, creds["uid"], creds["api_key"],
+                "helpdesk.tag", "helpdesk_tag_names")
+    ticket = enriched[0]
+    ticket["description"] = sanitize_html(ticket.get("description"))
 
     # Messages
     messages = await _odoo(
@@ -1509,7 +1526,6 @@ async def api_ticket_detail(request: Request, ticket_id: int):
         else:
             msg["_author"] = "System"
         msg["body"] = sanitize_html(msg.get("body"))
-    ticket["description"] = sanitize_html(ticket.get("description"))
 
     return {"ticket": ticket, "messages": messages}
 
@@ -1659,6 +1675,65 @@ async def api_update_ticket_status(request: Request, ticket_id: int):
     cache_clear(creds["uid"], "open_tasks_gantt")
 
     return {"ok": True}
+
+
+@app.post("/api/ticket/{ticket_id}/update")
+async def api_update_ticket(request: Request, ticket_id: int):
+    """Partial update of a helpdesk ticket. Accepts the same body shape
+    as /api/task/{id}/update — frontend sends only the fields that
+    changed (dirty-tracking). convert_value handles the type coercion.
+
+    Note: tickets use single user_id (many2one), not many2many like
+    tasks. partner_id is single m2o. tag_ids is the helpdesk.tag m2m.
+    """
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+
+    # Mapping: incoming form field → (Odoo field on helpdesk.ticket, ftype).
+    # The frontend uses the same field names as the task panel so panel
+    # save logic is identical; the server routes them to the right Odoo
+    # field here.
+    ticket_field_map = {
+        "name": ("name", "string"),
+        "stage_id": ("stage_id", "int"),
+        "priority": ("priority", "string"),
+        "user_id": ("user_id", "int_or_false"),
+        "x_studio_customer": ("partner_id", "int_or_false"),
+        "x_studio_issue_type": ("x_studio_customer_impact", "string_or_false"),
+        "x_studio_related_field_5vi_1jnfmj9cf": ("x_studio_escalated", "bool"),
+        "x_studio_related_field_gd_1jnftb4gl": ("x_studio_customer_funded", "string_or_false"),
+        "x_studio_related_field_27d_1jnftbs3p": ("x_studio_paid_prioritization", "bool"),
+        "tag_ids": ("tag_ids", "many2many_replace"),
+    }
+
+    values = {}
+    for key, (odoo_field, ftype) in ticket_field_map.items():
+        if key not in data:
+            continue
+        result = convert_value(data[key], ftype)
+        if result is not _SKIP:
+            values[odoo_field] = result
+
+    if not values:
+        return {"ok": True, "updated": 0}
+
+    try:
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], "helpdesk.ticket",
+                    [ticket_id], values)
+    except Exception as e:
+        raise _odoo_error_response("Ticket update", e)
+
+    # Writes to a ticket also flow back to the linked project.task via
+    # Odoo Studio related fields, so the task-side caches must be busted
+    # too — otherwise the Projects backlog renders stale data.
+    cache_clear(creds["uid"], "open_tickets")
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
+
+    return {"ok": True, "updated": len(values)}
 
 
 @app.get("/api/ticket/lookup/{ticket_ref}")
