@@ -104,6 +104,8 @@ function setTicketPanelTitle(ticket) {
 // Task version. Same shape as the ticket title, but the secondary line
 // names the linked helpdesk ticket (and its Bugzilla ref when present,
 // parsed from the m2o display name e.g. "JC keyboard (#57077)").
+// The ticket number is rendered as a clickable link that swaps the
+// panel over to the ticket — same-tab handoff, no full page nav.
 function setTaskPanelTitle(task) {
     const titleEl = document.getElementById('panelTitle');
     let html =
@@ -113,12 +115,16 @@ function setTaskPanelTitle(task) {
         const ticketId = task.helpdesk_ticket_id[0];
         const ticketName = task.helpdesk_ticket_id[1] || '';
         // Bugzilla numbers were appended as "(#NNNNN)" during migration.
-        // Pull it out so we can show "Linked to ticket #101274 · Bugzilla #57077".
         const m = ticketName.match(/\(#(\d+)\)/);
-        let line = 'Linked to ticket #' + ticketId;
-        if (m) line += ' · Bugzilla #' + m[1];
+        const linkAttrs =
+            'href="#" ' +
+            'onclick="event.preventDefault(); openTicketPanel(' + ticketId + ');" ' +
+            'title="Open ticket #' + ticketId + ' in this panel" ' +
+            'style="color:#2563eb;text-decoration:underline;cursor:pointer;"';
         html += '<div style="font-size:0.7rem;color:#64748b;margin-top:0.15rem;">' +
-            escHtml(line) + '</div>';
+            'Linked to ticket <a ' + linkAttrs + '>#' + ticketId + '</a>';
+        if (m) html += ' · Bugzilla #' + escHtml(m[1]);
+        html += '</div>';
     }
     titleEl.innerHTML = html;
 }
