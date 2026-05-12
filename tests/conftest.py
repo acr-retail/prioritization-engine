@@ -3,8 +3,8 @@ test against the fail-loud SECRET_KEY check without bypassing it."""
 import os
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
-os.environ.setdefault("ODOO_URL", "http://localhost-nowhere")
-os.environ.setdefault("ODOO_DB", "test")
+os.environ.setdefault("ODOO_URL", "https://localhost-nowhere.invalid")
+os.environ.setdefault("ODOO_DB", "test-db")
 os.environ.setdefault("ACR_ALLOWED_ORIGINS", "http://testserver,http://localhost:8000")
 
 import sys
@@ -361,6 +361,7 @@ def fake_odoo(monkeypatch):
     app._data_cache.clear()
     app.active_users.clear()
     app._selection_labels_cache = None
+    app._login_attempts.clear()
 
     return f
 

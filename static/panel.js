@@ -224,8 +224,8 @@ function renderPanel(task, messages) {
         '<span style="color:#64748b;font-size:0.85rem;">Priority Score — lower is more urgent</span>';
 
     let html = '<form id="panelForm" onsubmit="return savePanel(event)">';
-    html += '<div class="panel-field"><div class="panel-field-label">Title</div>' +
-        '<input type="text" name="name" value="' + escAttr(task.name || '') + '" class="panel-input"></div>';
+    html += '<div class="panel-field"><label class="panel-field-label" for="panel-field-name">Title</label>' +
+        '<input id="panel-field-name" type="text" name="name" value="' + escAttr(task.name || '') + '" class="panel-input"></div>';
     html += '<div class="panel-grid">';
 
     const hasTicket = !!(task.helpdesk_ticket_id && task.helpdesk_ticket_id !== false);
@@ -270,8 +270,8 @@ function renderPanel(task, messages) {
         'Hard constraint. The Gantt bar cannot be moved or extended past this date.');
     html += panelDate('Assigned', 'date_assign', task.date_assign ? task.date_assign.slice(0, 10) : '',
         'Date the task was assigned to the current developer.');
-    html += '<div class="panel-field"><div class="panel-field-label">Time Allocated (hrs)' + tipHtml('Budgeted hours for this task.') + '</div>' +
-        '<input type="number" name="allocated_hours" step="0.5" min="0" value="' + (task.allocated_hours || '') + '" class="panel-input" placeholder="—"></div>';
+    html += '<div class="panel-field"><label class="panel-field-label" for="panel-field-allocated_hours">Time Allocated (hrs)' + tipHtml('Budgeted hours for this task.') + '</label>' +
+        '<input id="panel-field-allocated_hours" type="number" name="allocated_hours" step="0.5" min="0" value="' + (task.allocated_hours || '') + '" class="panel-input" placeholder="—"></div>';
     html += panelReadonly('Time Spent', task.effective_hours ? task.effective_hours.toFixed(1) + 'h' : '—',
         'Actual hours logged via timesheets. Read-only.');
     html += '</div>';
@@ -333,25 +333,44 @@ function tipHtml(tip) {
     return ' <span class="panel-tooltip" title="' + escAttr(tip) + '">?</span>';
 }
 
+// All editable panel fields render as proper <label for="..."> + <input/select>
+// pairs so clicking the visible label focuses the control and screen
+// readers pair them correctly.
+function _fieldId(name) { return 'panel-field-' + name; }
+
 function panelSelect(label, name, currentVal, options, valKey, labelKey, tip) {
-    let h = '<div class="panel-field"><div class="panel-field-label">' + label + tipHtml(tip) + '</div><select name="' + name + '" class="panel-input"><option value="">—</option>';
-    for (const opt of options) { const v = String(opt[valKey]); h += '<option value="' + escAttr(v) + '"' + (String(currentVal) === v ? ' selected' : '') + '>' + escHtml(opt[labelKey]) + '</option>'; }
+    const id = _fieldId(name);
+    let h = '<div class="panel-field"><label class="panel-field-label" for="' + id + '">' +
+        escHtml(label) + tipHtml(tip) + '</label>' +
+        '<select id="' + id + '" name="' + name + '" class="panel-input"><option value="">—</option>';
+    for (const opt of options) {
+        const v = String(opt[valKey]);
+        h += '<option value="' + escAttr(v) + '"' + (String(currentVal) === v ? ' selected' : '') +
+             '>' + escHtml(opt[labelKey]) + '</option>';
+    }
     return h + '</select></div>';
 }
 
 function panelBool(label, name, val, tip) {
-    return '<div class="panel-field"><div class="panel-field-label">' + label + tipHtml(tip) + '</div><select name="' + name + '" class="panel-input">' +
+    const id = _fieldId(name);
+    return '<div class="panel-field"><label class="panel-field-label" for="' + id + '">' +
+        escHtml(label) + tipHtml(tip) + '</label>' +
+        '<select id="' + id + '" name="' + name + '" class="panel-input">' +
         '<option value="false"' + (val !== true ? ' selected' : '') + '>No</option>' +
         '<option value="true"' + (val === true ? ' selected' : '') + '>Yes</option></select></div>';
 }
 
 function panelDate(label, name, val, tip) {
-    return '<div class="panel-field"><div class="panel-field-label">' + label + tipHtml(tip) + '</div>' +
-        '<input type="date" name="' + name + '" value="' + escAttr(val) + '" class="panel-input"></div>';
+    const id = _fieldId(name);
+    return '<div class="panel-field"><label class="panel-field-label" for="' + id + '">' +
+        escHtml(label) + tipHtml(tip) + '</label>' +
+        '<input id="' + id + '" type="date" name="' + name + '" value="' + escAttr(val) + '" class="panel-input"></div>';
 }
 
+// Read-only fields have no associated input, so they don't need a <label>
+// (no element to focus). A heading-style div is correct here.
 function panelReadonly(label, val, tip) {
-    return '<div class="panel-field"><div class="panel-field-label">' + label + tipHtml(tip) + '</div>' +
+    return '<div class="panel-field"><div class="panel-field-label">' + escHtml(label) + tipHtml(tip) + '</div>' +
         '<div class="panel-field-value">' + escHtml(String(val)) + '</div></div>';
 }
 
@@ -363,12 +382,12 @@ function renderTagEditor(task) {
     const tags = task._tags || [];
     const currentIds = tags.map(t => String(t.id));
     let h = '<div class="panel-field" style="margin-top:1rem;">' +
-        '<div class="panel-field-label">Tags' + tipHtml('Categorize this task. Affects backlog filtering.') + '</div>' +
+        '<label class="panel-field-label" for="tagAddSelect">Tags' + tipHtml('Categorize this task. Affects backlog filtering.') + '</label>' +
         '<input type="hidden" name="tag_ids" value="' + escAttr(currentIds.join(',')) + '">' +
-        '<div id="tagChips" style="display:flex;flex-wrap:wrap;gap:0.25rem;margin-bottom:0.5rem;min-height:1.5rem;">';
+        '<div id="tagChips" role="list" aria-label="Current tags" style="display:flex;flex-wrap:wrap;gap:0.25rem;margin-bottom:0.5rem;min-height:1.5rem;">';
     tags.forEach(t => { h += renderTagChipHtml(t.id, t.name); });
     h += '</div>' +
-        '<select id="tagAddSelect" class="panel-input" onchange="addTagFromSelect()">' +
+        '<select id="tagAddSelect" class="panel-input" onchange="addTagFromSelect()" aria-label="Add a tag">' +
         '<option value="">+ Add tag…</option>';
     (fieldOptions?.tags || []).forEach(t => {
         h += '<option value="' + t.id + '" data-name="' + escAttr(t.name) + '">' + escHtml(t.name) + '</option>';
@@ -378,9 +397,11 @@ function renderTagEditor(task) {
 }
 
 function renderTagChipHtml(tagId, tagName) {
+    const labelText = 'Remove tag ' + tagName;
     return '<span class="tag-chip tag-chip-removable" data-tag-id="' + escAttr(String(tagId)) + '">' +
         escHtml(tagName) +
-        '<button type="button" onclick="removeTagChip(' + tagId + ')" title="Remove">×</button>' +
+        '<button type="button" onclick="removeTagChip(' + tagId + ')"' +
+        ' aria-label="' + escAttr(labelText) + '" title="' + escAttr(labelText) + '">×</button>' +
         '</span>';
 }
 

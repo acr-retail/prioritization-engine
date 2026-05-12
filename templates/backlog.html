@@ -209,7 +209,11 @@ function toggleBacklogHelp() {
         </thead>
         <tbody>
             {% for task in tasks %}
-            <tr onclick="handleRowClick(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')" data-task-id="{{ task.id }}" data-item-type="{{ task.get('_item_type', 'task') }}" data-project="{{ task.get('_project', '') }}" data-project-id="{{ task.get('_project_id', 0) }}">
+            <tr onclick="handleRowClick(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')"
+                onkeydown="handleRowKeydown(event, {{ task.id }}, '{{ task.get('_item_type', 'task') }}')"
+                tabindex="0" role="button"
+                aria-label="{{ task.get('_item_type', 'task') }} {{ task.id }}: {{ task.name }}"
+                data-task-id="{{ task.id }}" data-item-type="{{ task.get('_item_type', 'task') }}" data-project="{{ task.get('_project', '') }}" data-project-id="{{ task.get('_project_id', 0) }}">
                 <td>
                     <span class="score
                         {% if task._score < thresholds.critical %}score-critical
@@ -303,7 +307,7 @@ function filterByPriority(level) {
     if (typeof hideEmptyProjectGroups === 'function') hideEmptyProjectGroups();
 }
 
-// ---- Row click ----
+// ---- Row click + keyboard ----
 function handleRowClick(event, itemId, itemType) {
     if (bulkMode) {
         const row = event.currentTarget;
@@ -316,6 +320,16 @@ function handleRowClick(event, itemId, itemType) {
         } else {
             openPanel(itemId);
         }
+    }
+}
+
+// Enter or Space on a focused row opens it — same behavior as click.
+// Rows have tabindex=0 + role=button so keyboard users can navigate
+// through the backlog with Tab and activate items without a mouse.
+function handleRowKeydown(event, itemId, itemType) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleRowClick(event, itemId, itemType);
     }
 }
 
@@ -362,12 +376,26 @@ function applyBulkEdit() {
     const userId = document.getElementById('bulkAssignee').value;
     const msg = document.getElementById('bulkStatus_msg');
     if (!stageId && !userId) { msg.textContent = 'Select a status or assignee'; msg.style.color = '#fbbf24'; return; }
+    const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
+    const assigneeLabel = userId ? document.getElementById('bulkAssignee').selectedOptions[0].text : null;
+
+    // Confirm destructive bulk action. Changing 50 tasks' stage is easy
+    // to fat-finger and not trivially reversible — make the user think.
+    const changes = [];
+    if (stageLabel) changes.push('status to "' + stageLabel + '"');
+    if (assigneeLabel) changes.push('assignee to "' + assigneeLabel + '"');
+    const summary = 'Change ' + changes.join(' and ') +
+        ' on ' + ids.length + ' task' + (ids.length === 1 ? '' : 's') + '?';
+    if (!confirm(summary)) {
+        msg.textContent = 'Cancelled'; msg.style.color = '#94a3b8';
+        setTimeout(() => msg.textContent = '', 2000);
+        return;
+    }
+
     const payload = {task_ids: ids};
     if (stageId) payload.stage_id = stageId;
     if (userId) payload.user_ids = [userId];
     msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
-    const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
-    const assigneeLabel = userId ? document.getElementById('bulkAssignee').selectedOptions[0].text : null;
     // Optimistic UI update — Status is column 5, Assignee is column 12.
     // The old code wrote the status badge to column 4 (the Customer cell).
     ids.forEach(id => {
@@ -506,16 +534,48 @@ const FILTERS_STORAGE_KEY = 'backlogFilters:{{ view_mode }}';
 const table = document.getElementById('backlog-table');
 const filterSelects = table.querySelectorAll('.filter-row select');
 
-// Saved selections survive across page loads (per view-mode bucket so
-// Projects-tab filters don't leak into Helpdesk-tab options that don't exist).
+// Mapping column index → URL query key. Keeps URLs human-readable
+// (?status=New_1&tags=Enhancement instead of ?col_5=...&col_15=...).
+// Columns 1, 2, 3 are non-filterable (Groom, ID, Title).
+const COL_TO_URL_KEY = {
+    0: 'score', 4: 'customer', 5: 'status', 6: 'issue_type',
+    7: 'escalated', 8: 'funded', 9: 'effort', 10: 'paid',
+    11: 'roadmap', 12: 'assignee', 13: 'age', 14: 'created',
+    15: 'tags',
+};
+const URL_KEY_TO_COL = Object.fromEntries(
+    Object.entries(COL_TO_URL_KEY).map(([k, v]) => [v, parseInt(k)])
+);
+
+// Saved selections survive across page loads. URL is the source of
+// truth (shareable, browser back/forward) — localStorage is the
+// fallback for direct visits without query params.
 function loadSavedFilters() {
+    const url = new URL(window.location.href);
+    const fromUrl = {};
+    url.searchParams.forEach((value, key) => {
+        if (URL_KEY_TO_COL[key] !== undefined && value) {
+            fromUrl[URL_KEY_TO_COL[key]] = value;
+        }
+    });
+    if (Object.keys(fromUrl).length) return fromUrl;
     try {
         const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
         return raw ? JSON.parse(raw) : {};
     } catch { return {}; }
 }
+
 function saveFilters(map) {
     try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(map)); } catch {}
+    // Mirror to URL so a filtered view can be copy-pasted to a teammate.
+    const url = new URL(window.location.href);
+    // Strip all filter keys we own, then re-add active ones.
+    Object.values(COL_TO_URL_KEY).forEach(k => url.searchParams.delete(k));
+    Object.entries(map).forEach(([col, val]) => {
+        const key = COL_TO_URL_KEY[parseInt(col)];
+        if (key && val) url.searchParams.set(key, val);
+    });
+    window.history.replaceState({}, '', url.toString());
 }
 
 const savedFilters = loadSavedFilters();

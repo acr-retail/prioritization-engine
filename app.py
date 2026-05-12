@@ -172,6 +172,16 @@ async def enforce_csrf_origin(request: Request, call_next):
                 p = urlparse(ref)
                 source = f"{p.scheme}://{p.netloc}".rstrip("/")
         if source not in ALLOWED_ORIGINS:
+            # Log so we can spot probes / misconfigured clients
+            ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                  or (request.client.host if request.client else "unknown"))
+            try:
+                _security_logger.warning(
+                    f"csrf.rejected ip={ip} path={request.url.path} "
+                    f"method={request.method} source={source!r}"
+                )
+            except NameError:
+                pass  # logger not yet initialized at import time
             return JSONResponse(
                 {"detail": "Origin not allowed"},
                 status_code=403,
@@ -287,8 +297,19 @@ def get_sel_labels_cached(uid: int, api_key: str):
     cache_set(uid, "sel_labels", sl)
     return sl
 
-ODOO_URL = os.environ.get("ODOO_URL", "https://odoo-ps-psus-all-about-technology-sandbox-30173849.dev.odoo.com")
-ODOO_DB = os.environ.get("ODOO_DB", "odoo-ps-psus-all-about-technology-sandbox-30173849")
+ODOO_URL = (os.environ.get("ODOO_URL") or "").strip()
+ODOO_DB = (os.environ.get("ODOO_DB") or "").strip()
+if not ODOO_URL or not ODOO_DB:
+    raise RuntimeError(
+        "ODOO_URL and ODOO_DB env vars are required and must be set explicitly. "
+        "Previously these silently fell back to a sandbox URL, which could "
+        "cause the app to talk to the wrong Odoo if the env wasn't configured."
+    )
+if not ODOO_URL.startswith("https://"):
+    raise RuntimeError(
+        f"ODOO_URL must use https:// (got {ODOO_URL!r}). XML-RPC over plain "
+        "HTTP would expose API keys on the wire."
+    )
 
 # Odoo models for weight storage
 ATTR_MODEL = "x_acr_priority_attribute"
@@ -507,6 +528,76 @@ async def _odoo(fn, *args, **kwargs):
     """Run a blocking Odoo helper in the thread pool so the event loop
     stays free during the XML-RPC round trip."""
     return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+import uuid as _uuid
+
+# Set up the security logger once. Render captures stdout, so a plain
+# logger is sufficient — we don't need structlog or external sinks for 6 users.
+_security_logger = logging.getLogger("acr.security")
+_security_logger.setLevel(logging.INFO)
+if not _security_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    _security_logger.addHandler(_h)
+
+
+def _odoo_error_response(operation: str, exc: Exception, status: int = 400):
+    """Return an HTTPException that hides Odoo's internal error string from
+    the client. The raw fault is logged server-side with an error_id so
+    support can correlate a user-reported "request failed (id=...)" with
+    the actual exception."""
+    error_id = _uuid.uuid4().hex[:12]
+    _security_logger.error(
+        f"odoo_call_failed operation={operation} error_id={error_id}",
+        exc_info=exc,
+    )
+    return HTTPException(
+        status_code=status,
+        detail=f"{operation} failed. Reference: {error_id}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# /login rate limiter (IP-keyed, in-memory)
+# ---------------------------------------------------------------------------
+# Internal app, single worker — a module-level dict is sufficient.
+# Limit: 5 attempts per IP per 15-minute sliding window.
+_LOGIN_WINDOW_SEC = 15 * 60
+_LOGIN_MAX_ATTEMPTS = 5
+_login_attempts: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP. Render terminates TLS at its proxy so the
+    real client IP is in X-Forwarded-For; the first entry is what we want."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _login_rate_check(ip: str) -> bool:
+    """Returns True if the IP is allowed another login attempt. Side
+    effect: prunes expired entries."""
+    now = _time.time()
+    history = _login_attempts.setdefault(ip, [])
+    cutoff = now - _LOGIN_WINDOW_SEC
+    # In place: drop expired timestamps
+    history[:] = [t for t in history if t > cutoff]
+    if len(history) >= _LOGIN_MAX_ATTEMPTS:
+        return False
+    history.append(now)
+    return True
+
+
+def _login_rate_reset(ip: str) -> None:
+    """Clear an IP's attempt history. Called on successful login so a
+    legitimate user who fat-fingered a couple of API keys isn't locked
+    out for 15 minutes after they finally succeed."""
+    _login_attempts.pop(ip, None)
 
 
 # Sentinel: convert_value returns this when the value should not be sent
@@ -801,10 +892,29 @@ async def login_page(request: Request):
 
 @app.post("/login")
 async def login_submit(request: Request, login: str = Form(...), api_key: str = Form(...)):
+    ip = _client_ip(request)
+    if not _login_rate_check(ip):
+        _security_logger.warning(
+            f"login.rate_limited ip={ip} login={login}"
+        )
+        return RedirectResponse(
+            "/login?error=Too+many+attempts.+Wait+15+minutes+and+try+again.",
+            status_code=303,
+        )
     try:
         uid = await _odoo(odoo_authenticate, login, api_key)
     except Exception:
-        return RedirectResponse("/login?error=Authentication+failed.+Check+your+email+and+API+key.", status_code=303)
+        _security_logger.warning(
+            f"login.failed ip={ip} login={login}"
+        )
+        return RedirectResponse(
+            "/login?error=Authentication+failed.+Check+your+email+and+API+key.",
+            status_code=303,
+        )
+    # Successful login — clear the IP's attempt history so a user who
+    # finally got their key right isn't penalized for earlier typos.
+    _login_rate_reset(ip)
+    _security_logger.info(f"login.ok ip={ip} login={login} uid={uid}")
     request.session["uid"] = uid
     request.session["api_key"] = api_key
     request.session["login"] = login
@@ -1046,7 +1156,7 @@ async def api_update_task_dates(request: Request, task_id: int):
     try:
         await _odoo(odoo_write, creds["uid"], creds["api_key"], "project.task", [task_id], values)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _odoo_error_response("Update task dates", e)
 
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
@@ -1225,7 +1335,7 @@ async def update_task(request: Request, task_id: int):
                         [task_id], task_values)
             updated += len(task_values)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Task update failed: {e}")
+            raise _odoo_error_response("Task update", e)
 
     # Write ticket fields (if there's a linked ticket)
     if ticket_values:
@@ -1247,7 +1357,7 @@ async def update_task(request: Request, task_id: int):
                             [ticket_id_link], ticket_values)
                 updated += len(ticket_values)
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Ticket update failed: {e}")
+                raise _odoo_error_response("Ticket update", e)
         else:
             logging.warning(f"Task {task_id} has no linked helpdesk ticket — "
                             f"skipping ticket fields: {list(ticket_values.keys())}")
@@ -1515,7 +1625,7 @@ async def api_bulk_update(request: Request):
         await _odoo(odoo_write, creds["uid"], creds["api_key"], "project.task",
                     [int(t) for t in task_ids], values)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _odoo_error_response("Bulk task update", e)
 
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
@@ -1539,7 +1649,7 @@ async def api_update_ticket_status(request: Request, ticket_id: int):
         await _odoo(odoo_write, creds["uid"], creds["api_key"], "helpdesk.ticket",
                     [ticket_id], {"stage_id": int(stage_id)})
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _odoo_error_response("Ticket status update", e)
 
     # Bust the cached task/ticket lists so the next /backlog render
     # reflects the new stage (a closed ticket should drop off the open
