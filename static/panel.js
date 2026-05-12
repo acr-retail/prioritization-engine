@@ -45,7 +45,11 @@ fetch('/api/options')
 // ---- Panel open/close ----
 function openPanel(taskId) {
     currentTaskId = taskId;
-    document.getElementById('panelTitle').textContent = '#' + taskId;
+    // Loading state — renderPanel will replace this with the structured
+    // header (linked-ticket / Bugzilla annotations) once the fetch lands.
+    document.getElementById('panelTitle').innerHTML =
+        '<span style="font-size:0.65rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Project Task</span>' +
+        '<div style="font-size:1rem;font-weight:700;">#' + taskId + '</div>';
     document.getElementById('panelScore').innerHTML = '';
     document.getElementById('panelBody').innerHTML =
         '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
@@ -93,6 +97,28 @@ function setTicketPanelTitle(ticket) {
     if (ticket.ticket_ref) {
         html += '<div style="font-size:0.7rem;color:#64748b;margin-top:0.15rem;">' +
             'Migrated from Bugzilla #' + escHtml(String(ticket.ticket_ref)) + '</div>';
+    }
+    titleEl.innerHTML = html;
+}
+
+// Task version. Same shape as the ticket title, but the secondary line
+// names the linked helpdesk ticket (and its Bugzilla ref when present,
+// parsed from the m2o display name e.g. "JC keyboard (#57077)").
+function setTaskPanelTitle(task) {
+    const titleEl = document.getElementById('panelTitle');
+    let html =
+        '<span style="font-size:0.65rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Project Task</span>' +
+        '<div style="font-size:1rem;font-weight:700;">#' + task.id + '</div>';
+    if (task.helpdesk_ticket_id && Array.isArray(task.helpdesk_ticket_id)) {
+        const ticketId = task.helpdesk_ticket_id[0];
+        const ticketName = task.helpdesk_ticket_id[1] || '';
+        // Bugzilla numbers were appended as "(#NNNNN)" during migration.
+        // Pull it out so we can show "Linked to ticket #101274 · Bugzilla #57077".
+        const m = ticketName.match(/\(#(\d+)\)/);
+        let line = 'Linked to ticket #' + ticketId;
+        if (m) line += ' · Bugzilla #' + m[1];
+        html += '<div style="font-size:0.7rem;color:#64748b;margin-top:0.15rem;">' +
+            escHtml(line) + '</div>';
     }
     titleEl.innerHTML = html;
 }
@@ -296,6 +322,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel()
 function renderPanel(task, messages) {
     currentTaskId = task.id;
     const opts = fieldOptions || {};
+
+    // Structured header — Odoo task ID primary, linked-ticket / Bugzilla
+    // ref as secondary annotation when applicable.
+    setTaskPanelTitle(task);
 
     document.getElementById('panelScore').innerHTML =
         '<span class="score ' + getScoreClass(task._score) + '">' + task._score + '</span>' +
