@@ -175,17 +175,17 @@ function toggleBacklogHelp() {
                 <th data-col="1">Groom</th>
                 <th class="sortable" data-col="2" data-type="num">ID</th>
                 <th class="sortable" data-col="3" data-type="str">Title</th>
-                <th class="sortable" data-col="4" data-type="str">Customer</th>
+                <th class="sortable col-customer" data-col="4" data-type="str">Customer</th>
                 <th class="sortable" data-col="5" data-type="str">Status</th>
-                <th class="sortable" data-col="6" data-type="str">Issue Type</th>
+                <th class="sortable col-issue-type" data-col="6" data-type="str">Issue Type</th>
                 <th class="sortable" data-col="7" data-type="str">Esc.</th>
                 <th class="sortable" data-col="8" data-type="str">Funded</th>
                 <th class="sortable" data-col="9" data-type="str">Effort</th>
                 <th class="sortable" data-col="10" data-type="str">Paid</th>
                 <th class="sortable" data-col="11" data-type="str">Roadmap</th>
-                <th class="sortable" data-col="12" data-type="str">Assignee</th>
+                <th class="sortable col-assignee" data-col="12" data-type="str">Assignee</th>
                 <th class="sortable" data-col="13" data-type="str">Age</th>
-                <th class="sortable" data-col="14" data-type="str">Created</th>
+                <th class="sortable col-created" data-col="14" data-type="str">Created</th>
                 <th class="sortable" data-col="15" data-type="str">Tags</th>
             </tr>
             <tr class="filter-row">
@@ -232,22 +232,22 @@ function toggleBacklogHelp() {
                 </td>
                 <td style="color: #64748b; font-size: 0.8rem;">{{ task.get('ticket_ref', '') or task.id }}</td>
                 <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
-                <td>{% if task._customer %}<span class="badge badge-blue">{{ task._customer }}</span>{% endif %}</td>
+                <td class="col-customer" title="{{ task._customer }}">{% if task._customer %}<span class="badge badge-blue">{{ task._customer }}</span>{% endif %}</td>
                 <td>
                     {% if task._stage == 'New' %}<span class="badge badge-gray">{{ task._stage }}</span>
                     {% elif 'Progress' in task._stage %}<span class="badge badge-yellow">{{ task._stage }}</span>
                     {% elif 'Queued' in task._stage %}<span class="badge badge-blue">{{ task._stage }}</span>
                     {% else %}<span class="badge badge-gray">{{ task._stage }}</span>{% endif %}
                 </td>
-                <td style="font-size: 0.8rem;">{{ task._issue_type_label or '' }}</td>
+                <td class="col-issue-type" style="font-size: 0.8rem;" title="{{ task._issue_type_label or '' }}">{{ task._issue_type_label or '' }}</td>
                 <td>{% if task.get('x_studio_related_field_5vi_1jnfmj9cf') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
                 <td>{% set funded = task.get('x_studio_related_field_gd_1jnftb4gl', '') %}{% if funded == 'Yes' %}<span class="badge badge-green">Yes</span>{% else %}<span style="color:#cbd5e1;">{{ funded or 'No' }}</span>{% endif %}</td>
                 <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
                 <td>{% if task.get('x_studio_related_field_27d_1jnftbs3p') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
                 <td>{% if task.get('x_studio_road_map_flag') %}<span class="badge badge-blue">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
-                <td style="font-size:0.8rem;">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray">{{ task._assignee }}</span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
+                <td class="col-assignee" style="font-size:0.8rem;" title="{{ task._assignee or 'Unassigned' }}">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray">{{ task._assignee }}</span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
                 <td><span class="badge {% if task._age == '>90' %}badge-yellow{% elif task._age == '60-90' %}badge-blue{% else %}badge-gray{% endif %}">{{ task._age }}</span></td>
-                <td style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
+                <td class="col-created" style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
                 <td data-tags="{{ (task.get('_tags') or []) | map(attribute='name') | join(',') }}">
                     {% for tag in task.get('_tags') or [] %}<span class="tag-chip">{{ tag.name }}</span>{% endfor %}
                 </td>
@@ -784,13 +784,33 @@ function mountTagMultiSelect(select, tagOptionsKey, initialValue) {
         updateChecks();
     }
 
+    function positionPopover() {
+        // Use viewport coordinates (position: fixed) so the popover
+        // isn't clipped by the table's horizontal-scroll container.
+        // Right-align with the button so it doesn't extend off-screen
+        // when the filter is in the right-most column.
+        const r = button.getBoundingClientRect();
+        const popW = popover.offsetWidth || 200;
+        let left = r.right - popW;
+        if (left < 8) left = 8; // keep on-screen on the left edge too
+        popover.style.position = 'fixed';
+        popover.style.top = (r.bottom + 2) + 'px';
+        popover.style.left = left + 'px';
+        popover.style.right = 'auto';
+    }
     function open() {
         if (isOpen) return;
         isOpen = true;
         popover.style.display = 'block';
+        positionPopover();
         button.setAttribute('aria-expanded', 'true');
         document.addEventListener('mousedown', onDocMouseDown);
         document.addEventListener('keydown', onDocKeyDown);
+        // Reposition on scroll/resize so the popover follows the button
+        // (e.g., user scrolls the page or the table horizontally with
+        // the popover open).
+        window.addEventListener('scroll', positionPopover, true);
+        window.addEventListener('resize', positionPopover);
     }
     function close() {
         if (!isOpen) return;
@@ -799,9 +819,11 @@ function mountTagMultiSelect(select, tagOptionsKey, initialValue) {
         button.setAttribute('aria-expanded', 'false');
         document.removeEventListener('mousedown', onDocMouseDown);
         document.removeEventListener('keydown', onDocKeyDown);
+        window.removeEventListener('scroll', positionPopover, true);
+        window.removeEventListener('resize', positionPopover);
     }
     function onDocMouseDown(e) {
-        if (!wrapper.contains(e.target)) close();
+        if (!wrapper.contains(e.target) && !popover.contains(e.target)) close();
     }
     function onDocKeyDown(e) {
         if (e.key === 'Escape') { close(); button.focus(); }

@@ -611,6 +611,49 @@
 
         /* ---- Responsive ---- */
 
+        /* Column truncation utilities. Cells with these classes clip
+           their content with an ellipsis when the viewport narrows,
+           rather than forcing horizontal scroll on the whole table. */
+        .col-customer, .col-issue-type, .col-assignee {
+            max-width: 9999px;          /* no truncation by default */
+        }
+        .col-customer span.badge,
+        .col-assignee span.badge {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        /* Laptop (~14" MacBook Air at 1440px) — squeeze the optional
+           columns so the table fits without horizontal scroll. */
+        @media (max-width: 1440px) {
+            .col-customer { max-width: 130px; }
+            .col-customer span.badge { max-width: 130px; }
+            .col-issue-type {
+                max-width: 140px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .col-assignee { max-width: 110px; }
+            .col-assignee span.badge { max-width: 110px; }
+            thead th, tbody td { padding: 0.4rem 0.5rem; }
+        }
+
+        /* Smaller laptop (1280px) — tighter still, drop the Created
+           column entirely since the Age badge already conveys recency. */
+        @media (max-width: 1280px) {
+            .col-customer { max-width: 100px; }
+            .col-customer span.badge { max-width: 100px; }
+            .col-issue-type { max-width: 110px; }
+            .col-assignee { max-width: 80px; }
+            .col-assignee span.badge { max-width: 80px; }
+            .col-created { display: none; }
+        }
+
         /* Tablet */
         @media (max-width: 1024px) {
             .container { padding: 1rem; padding-top: 56px; }
