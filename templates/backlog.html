@@ -654,7 +654,26 @@ function mountTagMultiSelect(select, tagOptionsKey, initialValue) {
     select.style.display = 'none';
     select.setAttribute('aria-hidden', 'true');
     select.tabIndex = -1;
-    if (initialValue) select.value = initialValue;
+
+    // Native <select>.value only accepts values that exist as an <option>.
+    // Since our state is an arbitrary comma-separated string like
+    // "Bug,Enhancement", we have to (re)create a single matching option
+    // every time the state changes. The select still drives the filter
+    // pipeline via its .value, so this keeps the existing applyFilters
+    // loop working unchanged.
+    function syncSelectValue(value) {
+        select.innerHTML = '';
+        const all = document.createElement('option');
+        all.value = '';
+        select.appendChild(all);
+        if (value) {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
+    }
+    syncSelectValue(initialValue || '');
 
     const wrapper = document.createElement('div');
     wrapper.className = 'multi-select-wrapper';
@@ -686,7 +705,7 @@ function mountTagMultiSelect(select, tagOptionsKey, initialValue) {
     function setSelected(arr) {
         const next = arr.join(',');
         if (select.value === next) return;
-        select.value = next;
+        syncSelectValue(next);
         select.dispatchEvent(new Event('change', { bubbles: true }));
         updateButton();
         updateChecks();
