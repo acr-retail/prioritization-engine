@@ -451,7 +451,14 @@ function lookupClosedTicket() {
 function renderClosedTicket(data) {
     const ticket = data.ticket, task = data.task, messages = data.messages || [];
     const opts = fieldOptions || {};
-    document.getElementById('panelTitle').textContent = '#'+(ticket.ticket_ref || ticket.id);
+    // Use the same primary-Odoo / secondary-Bugzilla layout the live
+    // ticket panel uses, so a user who searched by Bugzilla number
+    // still sees the Odoo ID front-and-center as the canonical ref.
+    if (typeof setTicketPanelTitle === 'function') {
+        setTicketPanelTitle(ticket);
+    } else {
+        document.getElementById('panelTitle').textContent = '#' + (ticket.ticket_ref || ticket.id);
+    }
     document.getElementById('panelScore').innerHTML = task && task._score !== undefined
         ? '<span class="score '+(task._score<10?'score-critical':task._score<20?'score-high':task._score<30?'score-medium':'score-low')+'">'+task._score+'</span><span style="color:#64748b;font-size:0.85rem;">Priority Score</span>'
         : '<span class="badge badge-gray">Ticket</span>';

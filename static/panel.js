@@ -62,7 +62,12 @@ function openPanel(taskId) {
 }
 
 function openTicketPanel(ticketId) {
-    document.getElementById('panelTitle').textContent = '#' + ticketId;
+    // Loading state — we don't have ticket_ref yet, just show the Odoo
+    // number. renderTicketPanel will replace this with the structured
+    // header once the detail fetch resolves.
+    document.getElementById('panelTitle').innerHTML =
+        '<span style="font-size:0.65rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Odoo Ticket</span>' +
+        '<div style="font-size:1rem;font-weight:700;">#' + ticketId + '</div>';
     document.getElementById('panelScore').innerHTML = '';
     document.getElementById('panelBody').innerHTML =
         '<div style="text-align:center;padding:3rem;color:#94a3b8;">Loading...</div>';
@@ -78,9 +83,31 @@ function openTicketPanel(ticketId) {
         });
 }
 
+function setTicketPanelTitle(ticket) {
+    // Primary line: "Odoo Ticket #101274"
+    // Secondary line (only when ticket_ref present): "Migrated from Bugzilla #57077"
+    const titleEl = document.getElementById('panelTitle');
+    let html =
+        '<span style="font-size:0.65rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">Odoo Ticket</span>' +
+        '<div style="font-size:1rem;font-weight:700;">#' + ticket.id + '</div>';
+    if (ticket.ticket_ref) {
+        html += '<div style="font-size:0.7rem;color:#64748b;margin-top:0.15rem;">' +
+            'Migrated from Bugzilla #' + escHtml(String(ticket.ticket_ref)) + '</div>';
+    }
+    titleEl.innerHTML = html;
+}
+
 function renderTicketPanel(ticket, messages) {
     currentTaskId = ticket.id;
     const opts = fieldOptions || {};
+
+    // Header: Odoo ticket number is the canonical ID — that's what
+    // every URL, API call, and Odoo back-office record uses. If the
+    // ticket was migrated from Bugzilla and still carries its old
+    // ticket_ref, show that in a smaller line below as historical
+    // context. New tickets created directly in Odoo won't have a
+    // ticket_ref and will just show the Odoo number.
+    setTicketPanelTitle(ticket);
 
     const score = ticket._score || 0;
     document.getElementById('panelScore').innerHTML =
