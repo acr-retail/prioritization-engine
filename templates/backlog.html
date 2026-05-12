@@ -230,7 +230,8 @@ function toggleBacklogHelp() {
                     <span style="color:#d4d4d8;">✓</span>
                     {% endif %}
                 </td>
-                <td style="color: #64748b; font-size: 0.8rem;">{{ task.get('ticket_ref', '') or task.id }}</td>
+                <td style="color: #64748b; font-size: 0.8rem;"
+                    title="{% if task.get('ticket_ref') %}Migrated from Bugzilla #{{ task.ticket_ref }}{% else %}Odoo ID{% endif %}">{{ task.id }}</td>
                 <td class="truncate" title="{{ task.name }}">{{ task.name }}</td>
                 <td class="col-customer" title="{{ task._customer }}">{% if task._customer %}<span class="badge badge-blue">{{ task._customer }}</span>{% endif %}</td>
                 <td>
