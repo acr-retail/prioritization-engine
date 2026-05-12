@@ -85,15 +85,15 @@ class TestLoginRouteRateLimit:
 
     def test_successful_login_resets_counter(self, client, fake_odoo):
         from conftest import VALID_API_KEY
-        # Use 4 failed attempts (one short of the limit)
-        for _ in range(4):
+        # One short of the limit
+        for _ in range(app._LOGIN_MAX_ATTEMPTS - 1):
             client.post(
                 "/login",
                 data={"login": "x@y.z", "api_key": "wrong"},
                 headers=ORIGIN,
                 follow_redirects=False,
             )
-        # 5th attempt succeeds
+        # Next attempt succeeds (with correct creds)
         r = client.post(
             "/login",
             data={"login": "darcy@allabout.technology", "api_key": VALID_API_KEY},

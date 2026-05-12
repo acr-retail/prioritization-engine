@@ -564,7 +564,7 @@ def _odoo_error_response(operation: str, exc: Exception, status: int = 400):
 # Internal app, single worker — a module-level dict is sufficient.
 # Limit: 5 attempts per IP per 15-minute sliding window.
 _LOGIN_WINDOW_SEC = 15 * 60
-_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_MAX_ATTEMPTS = 10
 _login_attempts: dict[str, list[float]] = {}
 
 
