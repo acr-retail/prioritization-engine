@@ -553,6 +553,32 @@ function escHtml(s) { const d = document.createElement('div'); d.textContent = s
 
 function escAttr(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+// Mirrors the server-side `abbrev` Jinja filter (app.py:_abbrev).
+// "Bug" → "B"; "Development Task" → "DT".
+function abbrevTagName(name) {
+    if (!name) return '';
+    return String(name).split(/\s+/).filter(Boolean)
+        .map(w => w[0]).join('').toUpperCase();
+}
+
+// Mirrors the server-side `initials` Jinja filter (app.py:_initials).
+// "Darcy Reno" → "DR"; "Robert" → "R".
+function personInitials(name) {
+    if (!name) return '?';
+    const parts = String(name).split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Mirrors the server-side `firstname` Jinja filter (app.py:_first_name).
+// "Marc Belanski" → "Marc"; "Jim Lockwood" → "Jim".
+function personFirstName(name) {
+    if (!name) return '?';
+    const parts = String(name).split(/\s+/).filter(Boolean);
+    return parts[0] || '?';
+}
+
 function renderMessage(msg) {
     const d = msg.date ? msg.date.slice(0, 16).replace('T', ' ') : '';
     const a = msg._author || 'System';
@@ -679,13 +705,15 @@ function updateBacklogRow(task) {
     if (!row || !row.cells || row.cells.length < 15) return;
     const c = row.cells;
 
-    // 15: Tags (only present on the Projects view — column was added after
-    // Created so existing column indices weren't disturbed)
+    // 15: Tags. Pills show one/two-letter abbreviations matching the
+    // server-side render (first letter of each word in the tag name).
+    // Hover the pill for the full name.
     if (c.length > 15) {
         const tags = task._tags || [];
         c[15].dataset.tags = tags.map(t => t.name).join(',');
         c[15].innerHTML = tags.map(t =>
-            '<span class="tag-chip">' + escHtml(t.name) + '</span>'
+            '<span class="tag-chip tag-chip-abbrev" title="' + escAttr(t.name) + '">'
+            + escHtml(abbrevTagName(t.name)) + '</span>'
         ).join('');
     }
 
@@ -746,9 +774,15 @@ function updateBacklogRow(task) {
         ? '<span class="badge badge-blue">Yes</span>'
         : '<span style="color:#cbd5e1;">No</span>';
 
-    // 12: Assignee
+    // 12: Assignee — tri-render: full / first / initials. CSS at
+    // 1600px and 1400px breakpoints swaps which one is visible.
     if (task._assignee && task._assignee !== 'Unassigned') {
-        c[12].innerHTML = '<span class="badge badge-gray">' + escHtml(task._assignee) + '</span>';
+        c[12].innerHTML =
+            '<span class="badge badge-gray assignee-badge">'
+            + '<span class="full">'     + escHtml(task._assignee) + '</span>'
+            + '<span class="first">'    + escHtml(personFirstName(task._assignee)) + '</span>'
+            + '<span class="initials">' + escHtml(personInitials(task._assignee))  + '</span>'
+            + '</span>';
     } else {
         c[12].innerHTML = '<span style="color:#cbd5e1;">Unassigned</span>';
     }

@@ -207,6 +207,59 @@ async def no_cache_api(request: Request, call_next):
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
+
+def _abbrev(name: str) -> str:
+    """First letter of each whitespace-separated word, uppercased.
+
+    "Bug"              -> "B"
+    "Development Task" -> "DT"
+    "Customer Reported"-> "CR"
+    Empty / None       -> "".
+    Used by the tag-pill abbreviation in the backlog table — keeps the
+    pills narrow on laptop widths while the tooltip still surfaces the
+    full tag name.
+    """
+    if not name:
+        return ""
+    return "".join(w[0] for w in str(name).split() if w).upper()
+
+
+def _initials(name: str) -> str:
+    """First letter of the first word + first letter of the last word.
+
+    "Darcy Reno"        -> "DR"
+    "Daniel Schievink"  -> "DS"
+    "Robert"            -> "R"   (single-word names get just the one letter)
+    Empty / None        -> "?".
+    Used by the assignee badge below 1400px to fit in narrow columns.
+    """
+    if not name:
+        return "?"
+    parts = [p for p in str(name).split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][0].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _first_name(name: str) -> str:
+    """Just the first whitespace-separated token of a name.
+
+    "Marc Belanski" -> "Marc"; "Jim Lockwood" -> "Jim".
+    Used by the assignee badge between 1400-1600px — a middle ground
+    between full name and pure initials.
+    """
+    if not name:
+        return "?"
+    parts = [p for p in str(name).split() if p]
+    return parts[0] if parts else "?"
+
+
+templates.env.filters["abbrev"] = _abbrev
+templates.env.filters["initials"] = _initials
+templates.env.filters["firstname"] = _first_name
+
 # ---------------------------------------------------------------------------
 # SINGLE-WORKER ASSUMPTION
 # ---------------------------------------------------------------------------
@@ -1245,6 +1298,16 @@ async def api_options(request: Request):
         ["selection"],
     )
 
+    # helpdesk.ticket has its own x_studio_issue_type selection — different
+    # values than project.task (Critical/Major/... vs System-Stopping/...).
+    # The bulk-edit dropdown for tickets needs the ticket-specific list.
+    helpdesk_field_defs = await _odoo(
+        odoo_fields_get,
+        creds["uid"], creds["api_key"], "helpdesk.ticket",
+        ["x_studio_issue_type"],
+        ["selection"],
+    )
+
     # Fetch users (assignees)
     users = await _odoo(
         odoo_search_read,
@@ -1277,6 +1340,10 @@ async def api_options(request: Request):
         "issue_types": [
             {"value": s[0], "label": s[1]}
             for s in field_defs.get("x_studio_issue_type", {}).get("selection", [])
+        ],
+        "helpdesk_issue_types": [
+            {"value": s[0], "label": s[1]}
+            for s in helpdesk_field_defs.get("x_studio_issue_type", {}).get("selection", [])
         ],
         "effort_levels": [
             {"value": s[0], "label": s[1]}
@@ -1615,24 +1682,21 @@ async def api_post_ticket_comment(request: Request, ticket_id: int):
 
 @app.post("/api/tasks/bulk-update")
 async def api_bulk_update(request: Request):
-    """Bulk update multiple project.task records."""
+    """Bulk update multiple project.task records.
+
+    Accepts any combination of: stage_id (int), user_ids (single or list,
+    many2many on tasks), partner_id (int), x_studio_issue_type (str
+    selection), x_studio_level_of_effort (str selection). Only fields
+    actually present in the request body are written. Empty / missing
+    fields are not touched.
+    """
     creds = get_session_creds(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     data = await request.json()
     task_ids = data.get("task_ids", [])
-    values = {}
-
-    if data.get("stage_id"):
-        values["stage_id"] = int(data["stage_id"])
-    if data.get("user_ids") is not None:
-        # user_ids is a many2many — use [(6, 0, [ids])] to replace
-        user_list = data["user_ids"]
-        if isinstance(user_list, list):
-            values["user_ids"] = [(6, 0, [int(u) for u in user_list])]
-        elif user_list:
-            values["user_ids"] = [(6, 0, [int(user_list)])]
+    values = _build_task_bulk_values(data)
 
     if not task_ids or not values:
         raise HTTPException(status_code=400, detail="task_ids and at least one field required")
@@ -1646,7 +1710,73 @@ async def api_bulk_update(request: Request):
     cache_clear(creds["uid"], "open_tasks")
     cache_clear(creds["uid"], "open_tasks_gantt")
     cache_clear(creds["uid"], "open_tickets")
-    return {"ok": True, "updated": len(task_ids)}
+    return {"ok": True, "updated": len(task_ids), "fields": list(values.keys())}
+
+
+def _build_task_bulk_values(data: dict) -> dict:
+    """Translate the bulk-edit POST body into an Odoo write() vals dict
+    for project.task. Returns only the fields the caller supplied (and
+    actually set to a non-empty value).
+    """
+    values: dict = {}
+    if data.get("stage_id"):
+        values["stage_id"] = int(data["stage_id"])
+    if data.get("user_ids") is not None and data.get("user_ids") != "":
+        user_list = data["user_ids"]
+        if isinstance(user_list, list):
+            values["user_ids"] = [(6, 0, [int(u) for u in user_list])]
+        else:
+            values["user_ids"] = [(6, 0, [int(user_list)])]
+    if data.get("partner_id"):
+        values["partner_id"] = int(data["partner_id"])
+    if data.get("x_studio_issue_type"):
+        values["x_studio_issue_type"] = str(data["x_studio_issue_type"])
+    if data.get("x_studio_level_of_effort"):
+        values["x_studio_level_of_effort"] = str(data["x_studio_level_of_effort"])
+    return values
+
+
+@app.post("/api/tickets/bulk-update")
+async def api_bulk_update_tickets(request: Request):
+    """Bulk update multiple helpdesk.ticket records.
+
+    Mirrors /api/tasks/bulk-update but for the helpdesk side. Differences:
+      - user_id (m2o) not user_ids (m2m) — frontend sends a single id
+      - no x_studio_level_of_effort (field doesn't exist on tickets)
+      - x_studio_issue_type uses the helpdesk-specific selection values
+    """
+    creds = get_session_creds(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    data = await request.json()
+    ticket_ids = data.get("ticket_ids", [])
+    values: dict = {}
+
+    if data.get("stage_id"):
+        values["stage_id"] = int(data["stage_id"])
+    if data.get("user_id") is not None and data.get("user_id") != "":
+        values["user_id"] = int(data["user_id"])
+    if data.get("partner_id"):
+        values["partner_id"] = int(data["partner_id"])
+    if data.get("x_studio_issue_type"):
+        values["x_studio_issue_type"] = str(data["x_studio_issue_type"])
+
+    if not ticket_ids or not values:
+        raise HTTPException(status_code=400, detail="ticket_ids and at least one field required")
+
+    try:
+        await _odoo(odoo_write, creds["uid"], creds["api_key"], "helpdesk.ticket",
+                    [int(t) for t in ticket_ids], values)
+    except Exception as e:
+        raise _odoo_error_response("Bulk ticket update", e)
+
+    # A ticket write flows back to its dev-task companion via Studio related
+    # fields, so bust both caches.
+    cache_clear(creds["uid"], "open_tickets")
+    cache_clear(creds["uid"], "open_tasks")
+    cache_clear(creds["uid"], "open_tasks_gantt")
+    return {"ok": True, "updated": len(ticket_ids), "fields": list(values.keys())}
 
 
 @app.post("/api/ticket/{ticket_id}/update-status")

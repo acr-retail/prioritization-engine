@@ -383,10 +383,38 @@ class TestApiBulkUpdate:
             headers=ORIGIN,
         )
         assert r.status_code == 200
-        assert r.json() == {"ok": True, "updated": 2}
+        body = r.json()
+        assert body["ok"] is True
+        assert body["updated"] == 2
+        assert body["fields"] == ["stage_id"]
         _, ids, values = fake_odoo.writes[0]
         assert sorted(ids) == [3826, 4997]
         assert values == {"stage_id": 200}
+
+    def test_bulk_multi_field_task(self, authed_client, fake_odoo):
+        """All 5 supported task bulk fields land in a single write."""
+        r = authed_client.post(
+            "/api/tasks/bulk-update",
+            json={
+                "task_ids": [3826],
+                "stage_id": 200,
+                "user_ids": "42",            # single -> wrapped in [(6,0,[42])]
+                "partner_id": 9,
+                "x_studio_issue_type": "Major",
+                "x_studio_level_of_effort": "10-40 Hrs",
+            },
+            headers=ORIGIN,
+        )
+        assert r.status_code == 200
+        _, ids, values = fake_odoo.writes[0]
+        assert ids == [3826]
+        assert values == {
+            "stage_id": 200,
+            "user_ids": [(6, 0, [42])],
+            "partner_id": 9,
+            "x_studio_issue_type": "Major",
+            "x_studio_level_of_effort": "10-40 Hrs",
+        }
 
     def test_bulk_without_fields_400(self, authed_client):
         r = authed_client.post(
@@ -403,6 +431,60 @@ class TestApiBulkUpdate:
             headers=ORIGIN,
         )
         assert r.status_code == 400
+
+
+class TestApiBulkUpdateTickets:
+    def test_bulk_ticket_user_id_is_m2o(self, authed_client, fake_odoo):
+        """Helpdesk tickets use user_id (many2one) — single int, not m2m."""
+        r = authed_client.post(
+            "/api/tickets/bulk-update",
+            json={"ticket_ids": [101274, 105000], "user_id": "42"},
+            headers=ORIGIN,
+        )
+        assert r.status_code == 200
+        _, ids, values = fake_odoo.writes[0]
+        assert sorted(ids) == [101274, 105000]
+        assert values == {"user_id": 42}
+
+    def test_bulk_ticket_multi_field(self, authed_client, fake_odoo):
+        r = authed_client.post(
+            "/api/tickets/bulk-update",
+            json={
+                "ticket_ids": [101274],
+                "stage_id": 200,
+                "user_id": 42,
+                "partner_id": 9,
+                "x_studio_issue_type": "Low Priority Bug",
+            },
+            headers=ORIGIN,
+        )
+        assert r.status_code == 200
+        _, ids, values = fake_odoo.writes[0]
+        assert ids == [101274]
+        assert values == {
+            "stage_id": 200,
+            "user_id": 42,
+            "partner_id": 9,
+            "x_studio_issue_type": "Low Priority Bug",
+        }
+        # tickets endpoint should NOT accept x_studio_level_of_effort —
+        # passing it is silently ignored (field doesn't exist on helpdesk.ticket)
+        assert "x_studio_level_of_effort" not in values
+
+    def test_bulk_ticket_without_fields_400(self, authed_client):
+        r = authed_client.post(
+            "/api/tickets/bulk-update",
+            json={"ticket_ids": [101274]},
+            headers=ORIGIN,
+        )
+        assert r.status_code == 400
+
+    def test_bulk_ticket_csrf_blocks_post_without_origin(self, authed_client):
+        r = authed_client.post(
+            "/api/tickets/bulk-update",
+            json={"ticket_ids": [101274], "stage_id": 200},
+        )
+        assert r.status_code == 403
 
 
 # ---------------------------------------------------------------------------

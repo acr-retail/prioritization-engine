@@ -627,6 +627,60 @@
             vertical-align: middle;
         }
 
+        /* Hide the Groom column entirely (header + filter cell + body).
+           We removed the grooming-score UX but kept the cell positions
+           intact so the sort/filter/panel JS that references
+           row.cells[N] doesn't have to be renumbered. All three cells
+           in column 2 are hidden — including the empty filter-row <th>
+           which would otherwise still occupy header width. */
+        #backlog-table th[data-col="1"],
+        #backlog-table .filter-row th:nth-child(2),
+        #backlog-table tr td:nth-child(2) { display: none; }
+
+        /* Created column is fully hidden via the .col-created class
+           applied to header, filter <th>, AND body <td> in backlog.html. */
+        .col-created { display: none; }
+
+        /* On the helpdesk-tickets backlog the Effort column is hidden —
+           x_studio_level_of_effort doesn't exist on helpdesk.ticket so
+           the cell is always empty there. The filter-row <th> in cell 10
+           must also be hidden so the orphan dropdown doesn't render. */
+        #backlog-table.view-tickets th[data-col="9"],
+        #backlog-table.view-tickets .filter-row th:nth-child(10),
+        #backlog-table.view-tickets tr td:nth-child(10) { display: none; }
+
+        /* Tag chip abbreviation — pills show one-or-two-letter shorthand
+           by default (e.g. "Bug" → "B", "Development Task" → "DT"),
+           full name appears in the tooltip. Saves a lot of horizontal
+           space when a row has 3+ tags. */
+        .tag-chip-abbrev {
+            min-width: 1.6em;
+            text-align: center;
+            font-weight: 600;
+            cursor: help;
+        }
+
+        /* Assignee responsive: three rendering tiers driven by viewport.
+              full       >1600px   "Marc Belanski"
+              first  1401-1600px   "Marc"
+              initials  ≤1400px    "MB"
+           Each badge emits all three spans; CSS swaps visibility. No JS,
+           no resize listener — purely media-query driven. */
+        .assignee-badge .first,
+        .assignee-badge .initials { display: none; }
+
+        /* Below 1600px: drop the surname, keep first name only. */
+        @media (max-width: 1600px) {
+            .assignee-badge .full  { display: none; }
+            .assignee-badge .first { display: inline; }
+        }
+
+        /* Below 1400px: collapse all the way down to initials. */
+        @media (max-width: 1400px) {
+            .assignee-badge .first    { display: none; }
+            .assignee-badge .initials { display: inline; }
+        }
+
         /* Laptop (~14" MacBook Air at 1440px) — squeeze the optional
            columns so the table fits without horizontal scroll. */
         @media (max-width: 1440px) {
@@ -651,7 +705,6 @@
             .col-issue-type { max-width: 110px; }
             .col-assignee { max-width: 80px; }
             .col-assignee span.badge { max-width: 80px; }
-            .col-created { display: none; }
         }
 
         /* Tablet */

@@ -144,31 +144,73 @@ function toggleBacklogHelp() {
     <button onclick="clearAllFilters()">Clear filters</button>
 </div>
 
-<!-- Bulk Edit Bar -->
+<!-- Bulk Edit Bar.
+     Renders 5 dropdowns for project.task view, 4 for helpdesk.ticket
+     view (Effort is hidden via .view-tickets — see toggleBulkMode).
+     Each dropdown defaults to "— No change —"; only fields the user
+     actively picks are sent on submit. -->
 <div id="bulkBar" style="display:none;background:#111;color:#fff;padding:0.75rem 1rem;border-radius:8px;
     margin-bottom:0.75rem;align-items:center;gap:1rem;flex-wrap:wrap;">
     <span id="bulkCount" style="font-weight:600;font-size:0.85rem;">0 selected</span>
     <div style="display:flex;gap:0.75rem;align-items:center;flex:1;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:0.4rem;">
             <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Status:</label>
-            <select id="bulkStatus" class="panel-input" style="width:auto;min-width:120px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+            <select id="bulkStatus" class="panel-input" style="width:auto;min-width:110px;font-size:0.8rem;padding:0.3rem 0.5rem;">
                 <option value="">— No change —</option>
             </select>
         </div>
         <div style="display:flex;align-items:center;gap:0.4rem;">
             <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Assignee:</label>
-            <select id="bulkAssignee" class="panel-input" style="width:auto;min-width:150px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+            <select id="bulkAssignee" class="panel-input" style="width:auto;min-width:130px;font-size:0.8rem;padding:0.3rem 0.5rem;">
                 <option value="">— No change —</option>
             </select>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="applyBulkEdit()">Apply</button>
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Customer:</label>
+            <select id="bulkCustomer" class="panel-input" style="width:auto;min-width:130px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+                <option value="">— No change —</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Type:</label>
+            <select id="bulkIssueType" class="panel-input" style="width:auto;min-width:130px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+                <option value="">— No change —</option>
+            </select>
+        </div>
+        <div id="bulkEffortWrap" style="display:flex;align-items:center;gap:0.4rem;">
+            <label style="color:#94a3b8;font-size:0.75rem;margin:0;">Effort:</label>
+            <select id="bulkEffort" class="panel-input" style="width:auto;min-width:100px;font-size:0.8rem;padding:0.3rem 0.5rem;">
+                <option value="">— No change —</option>
+            </select>
+        </div>
+        <button class="btn btn-primary btn-sm" id="bulkApplyBtn" onclick="applyBulkEdit()">Apply</button>
         <span id="bulkStatus_msg" style="font-size:0.75rem;"></span>
     </div>
     <button onclick="toggleBulkMode()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.1rem;">✕</button>
 </div>
 
+<!-- Bulk progress overlay. Shown while applyBulkEdit() is running its
+     batched writes against Odoo. Each batch updates the bar + message.
+     Closes automatically once finished or shows an error to acknowledge. -->
+<div id="bulkProgress" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.55);
+    z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:1.25rem 1.5rem;min-width:340px;
+        box-shadow:0 18px 50px rgba(0,0,0,0.25);">
+        <div id="bulkProgress_title" style="font-weight:600;font-size:0.95rem;margin-bottom:0.4rem;">Applying bulk update…</div>
+        <div id="bulkProgress_detail" style="color:#475569;font-size:0.8rem;margin-bottom:0.75rem;">Preparing…</div>
+        <div style="background:#e2e8f0;height:8px;border-radius:9999px;overflow:hidden;">
+            <div id="bulkProgress_bar" style="height:100%;width:0%;background:#6366f1;transition:width 200ms ease;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.7rem;font-size:0.75rem;color:#64748b;">
+            <span id="bulkProgress_count">0 / 0</span>
+            <button id="bulkProgress_dismiss" onclick="dismissBulkProgress()"
+                style="display:none;background:#6366f1;color:#fff;border:none;border-radius:6px;padding:0.3rem 0.8rem;cursor:pointer;font-size:0.75rem;">OK</button>
+        </div>
+    </div>
+</div>
+
 <div class="card" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
-    <table id="backlog-table">
+    <table id="backlog-table" class="view-{{ view_mode }}">
         <thead>
             <tr>
                 <th class="sortable sort-asc" data-col="0">Score</th>
@@ -203,7 +245,7 @@ function toggleBacklogHelp() {
                 <th><select data-col="11"><option value="">All</option></select></th>
                 <th><select data-col="12"><option value="">All</option></select></th>
                 <th><select data-col="13"><option value="">All</option></select></th>
-                <th><select data-col="14"><option value="">All</option></select></th>
+                <th class="col-created"><select data-col="14"><option value="">All</option></select></th>
                 <th><select data-col="15" id="tagFilter"><option value="">All</option></select></th>
             </tr>
         </thead>
@@ -246,11 +288,11 @@ function toggleBacklogHelp() {
                 <td style="font-size: 0.8rem;">{{ task.x_studio_level_of_effort or '' }}</td>
                 <td>{% if task.get('x_studio_related_field_27d_1jnftbs3p') %}<span class="badge badge-yellow">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
                 <td>{% if task.get('x_studio_road_map_flag') %}<span class="badge badge-blue">Yes</span>{% else %}<span style="color:#cbd5e1;">No</span>{% endif %}</td>
-                <td class="col-assignee" style="font-size:0.8rem;" title="{{ task._assignee or 'Unassigned' }}">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray">{{ task._assignee }}</span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
+                <td class="col-assignee" style="font-size:0.8rem;" title="{{ task._assignee or 'Unassigned' }}">{% if task._assignee and task._assignee != 'Unassigned' %}<span class="badge badge-gray assignee-badge"><span class="full">{{ task._assignee }}</span><span class="first">{{ task._assignee | firstname }}</span><span class="initials">{{ task._assignee | initials }}</span></span>{% else %}<span style="color:#cbd5e1;">Unassigned</span>{% endif %}</td>
                 <td><span class="badge {% if task._age == '>90' %}badge-yellow{% elif task._age == '60-90' %}badge-blue{% else %}badge-gray{% endif %}">{{ task._age }}</span></td>
                 <td class="col-created" style="font-size: 0.8rem; color: #64748b; white-space: nowrap;">{{ task.create_date[:10] if task.create_date else '' }}</td>
                 <td data-tags="{{ (task.get('_tags') or []) | map(attribute='name') | join(',') }}">
-                    {% for tag in task.get('_tags') or [] %}<span class="tag-chip">{{ tag.name }}</span>{% endfor %}
+                    {% for tag in task.get('_tags') or [] %}<span class="tag-chip tag-chip-abbrev" title="{{ tag.name }}">{{ tag.name | abbrev }}</span>{% endfor %}
                 </td>
             </tr>
             {% endfor %}
@@ -358,65 +400,188 @@ function toggleBulkMode() {
     }
 }
 
+// Are we editing project.task or helpdesk.ticket? Drives which selection
+// list goes into the Issue Type dropdown and whether Effort is shown.
+const BULK_IS_TICKET = ('{{ view_mode }}' === 'tickets');
+
 function populateBulkDropdowns() {
     const opts = fieldOptions || {};
-    const ss = document.getElementById('bulkStatus');
-    const as = document.getElementById('bulkAssignee');
-    ss.innerHTML = '<option value="">— No change —</option>';
-    (opts.stages || []).forEach(s => ss.innerHTML += '<option value="'+s.id+'">'+escHtml(s.name)+'</option>');
-    as.innerHTML = '<option value="">— No change —</option>';
-    (opts.users || []).forEach(u => as.innerHTML += '<option value="'+u.id+'">'+escHtml(u.name)+'</option>');
+    const setOptions = (id, items, valKey, labelKey) => {
+        const el = document.getElementById(id);
+        el.innerHTML = '<option value="">— No change —</option>';
+        (items || []).forEach(it => {
+            el.innerHTML += '<option value="' + escAttr(String(it[valKey]))
+                + '">' + escHtml(it[labelKey]) + '</option>';
+        });
+    };
+    setOptions('bulkStatus',    opts.stages,    'id',    'name');
+    setOptions('bulkAssignee',  opts.users,     'id',    'name');
+    setOptions('bulkCustomer',  opts.customers, 'id',    'name');
+
+    // Type dropdown — selection list differs per model. Tasks use
+    // x_studio_issue_type with task severities; tickets use a different
+    // set (System Stopping Bug etc.). Backend exposes both buckets.
+    setOptions('bulkIssueType',
+               BULK_IS_TICKET ? opts.helpdesk_issue_types : opts.issue_types,
+               'value', 'label');
+
+    // Effort is a task-only field. Hide the whole control group on tickets.
+    document.getElementById('bulkEffortWrap').style.display =
+        BULK_IS_TICKET ? 'none' : 'flex';
+    if (!BULK_IS_TICKET) {
+        setOptions('bulkEffort', opts.effort_levels, 'value', 'label');
+    }
 }
 
 function updateBulkCount() { document.getElementById('bulkCount').textContent = selectedIds.size + ' selected'; }
 
+// Gather the bulk-edit form into a payload dict keyed by field name
+// (server-side build_task_bulk_values / ticket variant unpacks it).
+// Returns null if the user didn't pick anything.
+function _collectBulkValues() {
+    const stageId   = document.getElementById('bulkStatus').value;
+    const userId    = document.getElementById('bulkAssignee').value;
+    const partnerId = document.getElementById('bulkCustomer').value;
+    const issueType = document.getElementById('bulkIssueType').value;
+    const effort    = BULK_IS_TICKET ? '' : document.getElementById('bulkEffort').value;
+
+    const labels = {};
+    const fields = {};
+    if (stageId)   { fields.stage_id = stageId;
+                     labels.status = document.getElementById('bulkStatus').selectedOptions[0].text; }
+    if (userId)    { labels.assignee = document.getElementById('bulkAssignee').selectedOptions[0].text;
+                     // shape differs: tasks=user_ids m2m, tickets=user_id m2o
+                     if (BULK_IS_TICKET) fields.user_id = userId;
+                     else fields.user_ids = [userId]; }
+    if (partnerId) { fields.partner_id = partnerId;
+                     labels.customer = document.getElementById('bulkCustomer').selectedOptions[0].text; }
+    if (issueType) { fields.x_studio_issue_type = issueType;
+                     labels.type = document.getElementById('bulkIssueType').selectedOptions[0].text; }
+    if (effort)    { fields.x_studio_level_of_effort = effort;
+                     labels.effort = document.getElementById('bulkEffort').selectedOptions[0].text; }
+
+    if (Object.keys(fields).length === 0) return null;
+    return { fields, labels };
+}
+
 function applyBulkEdit() {
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
-    const stageId = document.getElementById('bulkStatus').value;
-    const userId = document.getElementById('bulkAssignee').value;
     const msg = document.getElementById('bulkStatus_msg');
-    if (!stageId && !userId) { msg.textContent = 'Select a status or assignee'; msg.style.color = '#fbbf24'; return; }
-    const stageLabel = stageId ? document.getElementById('bulkStatus').selectedOptions[0].text : null;
-    const assigneeLabel = userId ? document.getElementById('bulkAssignee').selectedOptions[0].text : null;
 
-    // Confirm destructive bulk action. Changing 50 tasks' stage is easy
-    // to fat-finger and not trivially reversible — make the user think.
-    const changes = [];
-    if (stageLabel) changes.push('status to "' + stageLabel + '"');
-    if (assigneeLabel) changes.push('assignee to "' + assigneeLabel + '"');
-    const summary = 'Change ' + changes.join(' and ') +
-        ' on ' + ids.length + ' task' + (ids.length === 1 ? '' : 's') + '?';
+    const picked = _collectBulkValues();
+    if (!picked) { msg.textContent = 'Pick at least one field'; msg.style.color = '#fbbf24'; return; }
+
+    const changeLabels = Object.entries(picked.labels).map(([k,v]) => k + ' → "' + v + '"');
+    const recordType = BULK_IS_TICKET ? 'ticket' : 'task';
+    const summary = 'Change ' + changeLabels.join(', ') + ' on '
+        + ids.length + ' ' + recordType + (ids.length === 1 ? '' : 's') + '?';
     if (!confirm(summary)) {
         msg.textContent = 'Cancelled'; msg.style.color = '#94a3b8';
         setTimeout(() => msg.textContent = '', 2000);
         return;
     }
 
-    const payload = {task_ids: ids};
-    if (stageId) payload.stage_id = stageId;
-    if (userId) payload.user_ids = [userId];
-    msg.textContent = 'Updating...'; msg.style.color = '#94a3b8';
-    // Optimistic UI update — Status is column 5, Assignee is column 12.
-    // The old code wrote the status badge to column 4 (the Customer cell).
-    ids.forEach(id => {
-        const row = document.querySelector('tr[data-task-id="'+id+'"]');
-        if (!row || row.cells.length < 13) return;
-        if (stageLabel) {
-            let badgeCls = 'badge-gray';
-            if (stageLabel.includes('Progress')) badgeCls = 'badge-yellow';
-            else if (stageLabel.includes('Queued')) badgeCls = 'badge-blue';
-            row.cells[5].innerHTML = '<span class="badge '+badgeCls+'">'+escHtml(stageLabel)+'</span>';
+    _runBulkUpdate(ids, picked, recordType);
+}
+
+// Batch the request into chunks of BULK_BATCH ids so the user gets
+// incremental progress feedback. Smaller batches = more granular UI
+// but more network round-trips; 25 is a good balance.
+const BULK_BATCH = 25;
+
+async function _runBulkUpdate(ids, picked, recordType) {
+    const overlay   = document.getElementById('bulkProgress');
+    const titleEl   = document.getElementById('bulkProgress_title');
+    const detailEl  = document.getElementById('bulkProgress_detail');
+    const barEl     = document.getElementById('bulkProgress_bar');
+    const countEl   = document.getElementById('bulkProgress_count');
+    const dismissEl = document.getElementById('bulkProgress_dismiss');
+    overlay.style.display = 'flex';
+    dismissEl.style.display = 'none';
+
+    titleEl.textContent = 'Applying bulk update…';
+    detailEl.textContent = 'Setting ' +
+        Object.keys(picked.labels).map(k => k + '="' + picked.labels[k] + '"').join(', ') +
+        ' on ' + ids.length + ' ' + recordType + (ids.length === 1 ? '' : 's');
+    countEl.textContent = '0 / ' + ids.length;
+    barEl.style.width = '0%';
+
+    const url = BULK_IS_TICKET ? '/api/tickets/bulk-update' : '/api/tasks/bulk-update';
+    const idKey = BULK_IS_TICKET ? 'ticket_ids' : 'task_ids';
+    let processed = 0;
+    let failed = 0;
+
+    for (let i = 0; i < ids.length; i += BULK_BATCH) {
+        const batch = ids.slice(i, i + BULK_BATCH);
+        const payload = Object.assign({ [idKey]: batch }, picked.fields);
+
+        try {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!r.ok) {
+                const errData = await r.json().catch(() => ({}));
+                throw new Error(errData.detail || ('HTTP ' + r.status));
+            }
+            processed += batch.length;
+        } catch (e) {
+            failed += batch.length;
+            detailEl.textContent = 'Error on batch ' + (i + 1) + '-' +
+                (i + batch.length) + ': ' + e.message;
+            titleEl.textContent = 'Bulk update failed';
+            barEl.style.background = '#dc2626';
+            dismissEl.style.display = 'inline-block';
+            return;
         }
-        if (assigneeLabel) {
-            row.cells[12].innerHTML = '<span class="badge badge-gray">'+escHtml(assigneeLabel)+'</span>';
-        }
-        if (typeof flashRow === 'function') flashRow(id);
-    });
-    fetch('/api/tasks/bulk-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
-        .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail); }); return r.json(); })
-        .then(r => { msg.textContent = '✓ Updated '+r.updated; msg.style.color = '#4ade80'; setTimeout(() => msg.textContent = '', 3000); })
-        .catch(e => { msg.textContent = '✗ '+e.message; msg.style.color = '#f87171'; });
+
+        // Optimistically update the visible rows so the user sees the
+        // change immediately. Status badge cell is c[5], assignee c[12].
+        batch.forEach(id => {
+            const row = document.querySelector('tr[data-task-id="' + id + '"]');
+            if (!row || row.cells.length < 13) return;
+            if (picked.labels.status) {
+                let badgeCls = 'badge-gray';
+                if (picked.labels.status.includes('Progress')) badgeCls = 'badge-yellow';
+                else if (picked.labels.status.includes('Queued')) badgeCls = 'badge-blue';
+                row.cells[5].innerHTML = '<span class="badge ' + badgeCls + '">'
+                    + escHtml(picked.labels.status) + '</span>';
+            }
+            if (picked.labels.assignee) {
+                row.cells[12].innerHTML =
+                    '<span class="badge badge-gray assignee-badge">' +
+                    '<span class="full">'     + escHtml(picked.labels.assignee) + '</span>' +
+                    '<span class="first">'    + escHtml(personFirstName(picked.labels.assignee)) + '</span>' +
+                    '<span class="initials">' + escHtml(personInitials(picked.labels.assignee))  + '</span>' +
+                    '</span>';
+            }
+            if (typeof flashRow === 'function') flashRow(id);
+        });
+
+        const pct = (processed / ids.length) * 100;
+        barEl.style.width = pct.toFixed(1) + '%';
+        countEl.textContent = processed + ' / ' + ids.length;
+    }
+
+    titleEl.textContent = 'Done';
+    detailEl.textContent = '✓ Updated ' + processed + ' ' + recordType +
+        (processed === 1 ? '' : 's') + (failed ? ' (' + failed + ' failed)' : '');
+    barEl.style.background = '#22c55e';
+    dismissEl.style.display = 'inline-block';
+
+    const msg = document.getElementById('bulkStatus_msg');
+    msg.textContent = '✓ Updated ' + processed;
+    msg.style.color = '#4ade80';
+    setTimeout(() => msg.textContent = '', 3000);
+}
+
+function dismissBulkProgress() {
+    const overlay = document.getElementById('bulkProgress');
+    overlay.style.display = 'none';
+    // Reset bar colour for next run.
+    document.getElementById('bulkProgress_bar').style.background = '#6366f1';
 }
 
 // ---- Closed Ticket Lookup ----
