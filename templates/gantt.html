@@ -161,15 +161,29 @@ const ASSIGNED_COLOR = '#93b5e6';
 const UNASSIGNED_COLOR = '#e57373';
 function barColor(t) { return (t._assignee && t._assignee !== 'Unassigned') ? ASSIGNED_COLOR : UNASSIGNED_COLOR; }
 
-// Filters
+// Filters — built from the loaded task set, then each <select> is wrapped
+// in a multi-select widget (defined in /static/multi-select.js, loaded by
+// base.html). Each filter accepts comma-separated values; rebuildGantt
+// splits the string and OR-matches.
 const _c = [...new Set(allTasks.map(t=>t._customer).filter(Boolean))].sort();
 const _a = [...new Set(allTasks.map(t=>t._assignee).filter(Boolean))].sort();
 const _s = [...new Set(allTasks.map(t=>t._stage).filter(Boolean))].sort();
 const _p = [...new Set(allTasks.map(t=>t._project).filter(Boolean))].sort();
-_c.forEach(c => document.getElementById('filterCustomer').innerHTML += '<option>'+escHtml(c)+'</option>');
-_a.forEach(a => document.getElementById('filterAssignee').innerHTML += '<option>'+escHtml(a)+'</option>');
-_s.forEach(s => document.getElementById('filterStatus').innerHTML += '<option>'+escHtml(s)+'</option>');
-_p.forEach(p => document.getElementById('filterProject').innerHTML += '<option>'+escHtml(p)+'</option>');
+
+const GANTT_FILTERS = [
+    { id: 'filterCustomer', values: _c, label: 'Filter by customer' },
+    { id: 'filterAssignee', values: _a, label: 'Filter by assignee' },
+    { id: 'filterStatus',   values: _s, label: 'Filter by status' },
+    { id: 'filterProject',  values: _p, label: 'Filter by project' },
+];
+GANTT_FILTERS.forEach(f => {
+    const sel = document.getElementById(f.id);
+    // The inline onchange="rebuildGantt()" handler stays — the widget
+    // dispatches `change` after every selection, so the gantt rebuilds
+    // automatically just like with the old single-select dropdowns.
+    const options = f.values.map(v => ({ value: v, label: v }));
+    mountMultiSelect(sel, options, { label: f.label, initial: '' });
+});
 
 // Date helpers
 function pd(s){return new Date(s+'T00:00:00')} function fd(d){return d.toISOString().slice(0,10)}
@@ -221,19 +235,29 @@ function px2d(px) {
     return new Date(startDate.getTime() + (px / totalW) * span);
 }
 
+// (MS_SEP lives in /static/multi-select.js — don't redeclare; classic
+// <script> tags share script-scope and a second `const` throws.)
+
 function rebuildGantt() {
     setupZoom();
     const gBy = document.getElementById('groupBy').value;
-    const fP = document.getElementById('filterProject').value;
-    const fC = document.getElementById('filterCustomer').value;
-    const fA = document.getElementById('filterAssignee').value;
-    const fS = document.getElementById('filterStatus').value;
+    // Each filter is multi-select — value is a \x1f-joined string.
+    // Split into a Set; empty Set means "no filter".
+    // OR-match within a filter, AND across filters.
+    const splitFilter = (id) => {
+        const v = document.getElementById(id).value;
+        return v ? new Set(v.split(MS_SEP).filter(Boolean)) : null;
+    };
+    const fP = splitFilter('filterProject');
+    const fC = splitFilter('filterCustomer');
+    const fA = splitFilter('filterAssignee');
+    const fS = splitFilter('filterStatus');
 
     let tasks = allTasks.filter(t => {
-        if (fP && t._project !== fP) return false;
-        if (fC && t._customer !== fC) return false;
-        if (fA && t._assignee !== fA) return false;
-        if (fS && t._stage !== fS) return false;
+        if (fP && !fP.has(t._project)) return false;
+        if (fC && !fC.has(t._customer)) return false;
+        if (fA && !fA.has(t._assignee)) return false;
+        if (fS && !fS.has(t._stage)) return false;
         return true;
     });
 
@@ -475,13 +499,16 @@ function openGroupInOdoo(groupType, groupName) {
             openProjectPanel(projId);
         }
     } else if (groupType === 'assignee') {
-        document.getElementById('filterAssignee').value = groupName;
+        // _setMultiSelectValue is attached by mountMultiSelect — direct
+        // .value assignment wouldn't work on the now-hidden <select>
+        // because the matching <option> doesn't exist by default.
+        document.getElementById('filterAssignee')._setMultiSelectValue([groupName]);
         rebuildGantt();
     } else if (groupType === 'customer') {
-        document.getElementById('filterCustomer').value = groupName;
+        document.getElementById('filterCustomer')._setMultiSelectValue([groupName]);
         rebuildGantt();
     } else if (groupType === 'status') {
-        document.getElementById('filterStatus').value = groupName;
+        document.getElementById('filterStatus')._setMultiSelectValue([groupName]);
         rebuildGantt();
     }
 }

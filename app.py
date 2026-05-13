@@ -375,7 +375,8 @@ EXCLUDED_STAGES = {"Complete", "Complete_1", "Cancelled"}
 TASK_FIELDS = [
     "id", "name", "stage_id", "create_date", "user_ids", "project_id",
     "tag_ids",                                  # project.tags many2many
-    "x_studio_customer",
+    "partner_id",                               # native task customer (m2o)
+    "x_studio_customer",                        # Studio related mirror via helpdesk_ticket_id
     "x_studio_issue_type",
     "x_studio_level_of_effort",
     "x_studio_road_map_flag",
@@ -799,12 +800,19 @@ def enrich_tasks(tasks: list, weight_map: dict, sel_labels: dict = None) -> list
         task["_age"] = compute_age_bracket(task.get("create_date", ""))
         task["_grooming"] = compute_grooming(task)
         task["_stage"] = task["stage_id"][1] if isinstance(task.get("stage_id"), (list, tuple)) else ""
+        # Customer comes from either x_studio_customer (Studio related-mirror
+        # of helpdesk_ticket_id.partner_id — only set when the task is linked
+        # to a helpdesk ticket) OR the task's native partner_id field. Many
+        # tasks set partner_id directly without a helpdesk link (project
+        # tasks, dev tasks created by dev_task_loader), so fall back to it.
         task["_customer"] = ""
-        cust = task.get("x_studio_customer")
-        if isinstance(cust, (list, tuple)) and len(cust) > 1:
-            task["_customer"] = cust[1]
-        elif cust and cust is not False:
-            task["_customer"] = str(cust)
+        for src in (task.get("x_studio_customer"), task.get("partner_id")):
+            if isinstance(src, (list, tuple)) and len(src) > 1:
+                task["_customer"] = src[1]
+                break
+            if src and src is not False:
+                task["_customer"] = str(src)
+                break
         proj = task.get("project_id")
         task["_project"] = proj[1] if isinstance(proj, (list, tuple)) and len(proj) > 1 else "No Project"
         task["_project_id"] = proj[0] if isinstance(proj, (list, tuple)) and len(proj) > 0 else 0

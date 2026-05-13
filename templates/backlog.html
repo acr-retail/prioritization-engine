@@ -756,18 +756,35 @@ const savedFilters = loadSavedFilters();
 // Which fieldOptions bucket holds the tag list for the current view.
 const TAG_OPTIONS_KEY = '{{ view_mode }}' === 'tickets' ? 'helpdesk_tags' : 'tags';
 
+// Columns where multi-select doesn't help — these are Yes/No flags whose
+// only two values would just make the filter behave like "All". Stay as
+// plain single-select dropdowns.
+const BOOLEAN_FILTER_COLS = new Set([7, 8, 10, 11]);  // Esc, Funded, Paid, Roadmap
+
+// Human-readable column label for the aria-label on each widget.
+const COL_LABEL = {
+    0: 'score', 4: 'customer', 5: 'status', 6: 'issue type',
+    9: 'effort', 12: 'assignee', 13: 'age', 15: 'tag',
+};
+
 filterSelects.forEach(select => {
     const col = parseInt(select.dataset.col);
 
     if (col === TAG_FILTER_COL) {
-        // The tag column gets a custom multi-select widget instead of the
-        // standard dropdown — tags are inherently multi-valued and "show
-        // me Bug + Enhancement" can't be done with a single-value select.
-        // The <select> stays in the DOM as the source of truth (its
-        // .value carries a comma-separated string), but it's hidden;
-        // the widget renders a button + popover on top.
+        // Tags get the All-Tagged / Untagged sentinels plus the tag catalog.
+        // Tag list comes from fieldOptions, which is fetched async — wait
+        // for it before mounting (otherwise the popover would be empty).
         const mountWidget = () => {
-            mountTagMultiSelect(select, TAG_OPTIONS_KEY, savedFilters[col] || '');
+            const tagOpts = (fieldOptions?.[TAG_OPTIONS_KEY] || [])
+                .map(t => ({ value: t.name, label: t.name }));
+            mountMultiSelect(select, tagOpts, {
+                specials: [
+                    { value: '__all_tagged__', label: 'All Tagged' },
+                    { value: '__untagged__',   label: 'Untagged' },
+                ],
+                label: 'Filter by tag',
+                initial: savedFilters[col] || '',
+            });
         };
         if (fieldOptions) mountWidget();
         else {
@@ -776,22 +793,38 @@ filterSelects.forEach(select => {
             }, 200);
             setTimeout(() => clearInterval(iv), 5000);
         }
-    } else {
+    } else if (BOOLEAN_FILTER_COLS.has(col)) {
+        // Boolean Yes/No columns — keep the plain dropdown.
         const values = new Set();
         table.querySelectorAll('tbody tr').forEach(row => {
             const t = row.cells[col]?.textContent.trim();
             if (t) values.add(t);
         });
-        Array.from(values).sort((a, b) => {
-            const na = parseFloat(a), nb = parseFloat(b);
-            if (!isNaN(na) && !isNaN(nb)) return na - nb;
-            return a.localeCompare(b);
-        }).forEach(val => {
+        Array.from(values).sort((a, b) => a.localeCompare(b)).forEach(val => {
             const o = document.createElement('option');
             o.value = val; o.textContent = val;
             select.appendChild(o);
         });
         if (savedFilters[col] !== undefined) select.value = savedFilters[col];
+    } else {
+        // All other filterable columns become multi-select. Options are
+        // distinct cell values harvested from the current table render.
+        const values = new Set();
+        table.querySelectorAll('tbody tr').forEach(row => {
+            const t = row.cells[col]?.textContent.trim();
+            if (t) values.add(t);
+        });
+        const sorted = Array.from(values).sort((a, b) => {
+            const na = parseFloat(a), nb = parseFloat(b);
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+        });
+        const options = sorted.map(v => ({ value: v, label: v }));
+        const label = COL_LABEL[col] || ('column ' + col);
+        mountMultiSelect(select, options, {
+            label: 'Filter by ' + label,
+            initial: savedFilters[col] || '',
+        });
     }
 
     select.addEventListener('change', () => {
@@ -806,215 +839,11 @@ filterSelects.forEach(select => {
     select.addEventListener('click', e => e.stopPropagation());
 });
 
-// ---- Tag multi-select widget ----
-// Builds a custom dropdown + popover around a hidden <select> element.
-// The <select>'s value is a comma-separated string ("Bug,Enhancement"
-// or sentinel "__all_tagged__" / "__untagged__"). The widget keeps that
-// string in sync so the existing filter pipeline reads it like any
-// other dropdown.
-//
-// Toggle semantics (precise per the validated plan):
-//   • No chips → no filter
-//   • "All Tagged" → items with ≥1 tag (mutually exclusive with Untagged + named)
-//   • "Untagged" → items with 0 tags (mutually exclusive with All Tagged + named)
-//   • One or more named tags → OR-combine among themselves
-//
-// ARIA + keyboard: button is aria-haspopup=listbox / aria-expanded.
-// Popover is role=listbox aria-multiselectable=true. Options are
-// role=option. Esc closes and returns focus to the button. Click-outside
-// also closes. Single document-level listener owned by the open state.
-function mountTagMultiSelect(select, tagOptionsKey, initialValue) {
-    select.style.display = 'none';
-    select.setAttribute('aria-hidden', 'true');
-    select.tabIndex = -1;
 
-    // Native <select>.value only accepts values that exist as an <option>.
-    // Since our state is an arbitrary comma-separated string like
-    // "Bug,Enhancement", we have to (re)create a single matching option
-    // every time the state changes. The select still drives the filter
-    // pipeline via its .value, so this keeps the existing applyFilters
-    // loop working unchanged.
-    function syncSelectValue(value) {
-        select.innerHTML = '';
-        const all = document.createElement('option');
-        all.value = '';
-        select.appendChild(all);
-        if (value) {
-            const opt = document.createElement('option');
-            opt.value = value;
-            opt.selected = true;
-            select.appendChild(opt);
-        }
-    }
-    syncSelectValue(initialValue || '');
-
-    const wrapper = document.createElement('div');
-    wrapper.className = 'multi-select-wrapper';
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'multi-select-button';
-    button.setAttribute('aria-haspopup', 'listbox');
-    button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-label', 'Filter by tag');
-
-    const popover = document.createElement('div');
-    popover.className = 'multi-select-popover';
-    popover.setAttribute('role', 'listbox');
-    popover.setAttribute('aria-multiselectable', 'true');
-    popover.setAttribute('aria-label', 'Tag filter options');
-    popover.style.display = 'none';
-
-    wrapper.appendChild(button);
-    wrapper.appendChild(popover);
-    select.parentNode.insertBefore(wrapper, select);
-    wrapper.appendChild(select);
-
-    let isOpen = false;
-
-    function getSelected() {
-        return select.value ? select.value.split(',').filter(Boolean) : [];
-    }
-    function setSelected(arr) {
-        const next = arr.join(',');
-        if (select.value === next) return;
-        syncSelectValue(next);
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        updateButton();
-        updateChecks();
-    }
-    function updateButton() {
-        const sel = getSelected();
-        let label;
-        if (sel.length === 0) label = 'All';
-        else if (sel.includes('__all_tagged__')) label = 'All Tagged';
-        else if (sel.includes('__untagged__')) label = 'Untagged';
-        else if (sel.length === 1) label = sel[0];
-        else if (sel.length === 2) label = sel.join(', ');
-        else label = sel.length + ' selected';
-        button.textContent = label;
-        if (sel.length) button.classList.add('active-filter');
-        else button.classList.remove('active-filter');
-    }
-    function updateChecks() {
-        const sel = new Set(getSelected());
-        popover.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-            cb.checked = sel.has(cb.value);
-        });
-    }
-    function handleToggle(value) {
-        const sel = new Set(getSelected());
-        const SPECIAL = ['__all_tagged__', '__untagged__'];
-        if (SPECIAL.includes(value)) {
-            // Clicking a special chip clears all others. Clicking the
-            // same one again deselects it.
-            if (sel.has(value)) sel.delete(value);
-            else { sel.clear(); sel.add(value); }
-        } else {
-            // Clicking a named chip clears the specials and toggles
-            // membership in the named set.
-            SPECIAL.forEach(s => sel.delete(s));
-            if (sel.has(value)) sel.delete(value);
-            else sel.add(value);
-        }
-        setSelected(Array.from(sel));
-    }
-    function buildOptions() {
-        popover.innerHTML = '';
-        const opts = [
-            { value: '__all_tagged__', label: 'All Tagged' },
-            { value: '__untagged__', label: 'Untagged' },
-            { divider: true },
-        ];
-        (fieldOptions?.[tagOptionsKey] || []).forEach(t => {
-            opts.push({ value: t.name, label: t.name });
-        });
-        if (opts.length === 3) {
-            // Helpdesk view with zero helpdesk.tag entries — still useful
-            // to filter by All Tagged / Untagged.
-        }
-        opts.forEach(o => {
-            if (o.divider) {
-                const hr = document.createElement('div');
-                hr.className = 'multi-select-divider';
-                hr.setAttribute('role', 'separator');
-                popover.appendChild(hr);
-                return;
-            }
-            const item = document.createElement('label');
-            item.className = 'multi-select-item';
-            item.setAttribute('role', 'option');
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.value = o.value;
-            cb.addEventListener('change', () => handleToggle(o.value));
-            const span = document.createElement('span');
-            span.textContent = o.label;
-            item.appendChild(cb);
-            item.appendChild(span);
-            popover.appendChild(item);
-        });
-        updateChecks();
-    }
-
-    function positionPopover() {
-        // Use viewport coordinates (position: fixed) so the popover
-        // isn't clipped by the table's horizontal-scroll container.
-        // Right-align with the button so it doesn't extend off-screen
-        // when the filter is in the right-most column.
-        const r = button.getBoundingClientRect();
-        const popW = popover.offsetWidth || 200;
-        let left = r.right - popW;
-        if (left < 8) left = 8; // keep on-screen on the left edge too
-        popover.style.position = 'fixed';
-        popover.style.top = (r.bottom + 2) + 'px';
-        popover.style.left = left + 'px';
-        popover.style.right = 'auto';
-    }
-    function open() {
-        if (isOpen) return;
-        isOpen = true;
-        popover.style.display = 'block';
-        positionPopover();
-        button.setAttribute('aria-expanded', 'true');
-        document.addEventListener('mousedown', onDocMouseDown);
-        document.addEventListener('keydown', onDocKeyDown);
-        // Reposition on scroll/resize so the popover follows the button
-        // (e.g., user scrolls the page or the table horizontally with
-        // the popover open).
-        window.addEventListener('scroll', positionPopover, true);
-        window.addEventListener('resize', positionPopover);
-    }
-    function close() {
-        if (!isOpen) return;
-        isOpen = false;
-        popover.style.display = 'none';
-        button.setAttribute('aria-expanded', 'false');
-        document.removeEventListener('mousedown', onDocMouseDown);
-        document.removeEventListener('keydown', onDocKeyDown);
-        window.removeEventListener('scroll', positionPopover, true);
-        window.removeEventListener('resize', positionPopover);
-    }
-    function onDocMouseDown(e) {
-        if (!wrapper.contains(e.target) && !popover.contains(e.target)) close();
-    }
-    function onDocKeyDown(e) {
-        if (e.key === 'Escape') { close(); button.focus(); }
-    }
-
-    button.addEventListener('click', () => isOpen ? close() : open());
-    button.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            open();
-            const first = popover.querySelector('input[type="checkbox"]');
-            if (first) first.focus();
-        }
-    });
-
-    buildOptions();
-    updateButton();
-}
+// (mountMultiSelect + MS_SEP both live in /static/multi-select.js,
+// loaded by base.html. Don't redeclare MS_SEP here — classic <script>
+// tags share script-scope, so a second `const MS_SEP` throws
+// "Identifier already declared" and halts page init.)
 
 function applyFilters() {
     const filters = {};
@@ -1026,21 +855,22 @@ function applyFilters() {
             const col = parseInt(c);
             const cell = row.cells[col];
             if (!cell) { vis = false; break; }
-            if (col === TAG_FILTER_COL) {
-                // Tag column now supports multi-select. Value is a
-                // comma-separated list of selected tag names or one of
-                // the sentinels __all_tagged__ / __untagged__.
-                const selected = f.split(',').filter(Boolean);
+            const selected = f.split(MS_SEP).filter(Boolean);
+            let pass;
+            if (selected.length === 0) {
+                pass = true;
+            } else if (col === TAG_FILTER_COL) {
+                // Tag column has the All-Tagged / Untagged sentinels plus
+                // OR-matching among picked tag names.
                 const tags = (cell.dataset.tags || '').split(',').filter(Boolean);
-                let pass;
-                if (selected.length === 0) pass = true;
-                else if (selected.includes('__all_tagged__')) pass = tags.length > 0;
+                if (selected.includes('__all_tagged__')) pass = tags.length > 0;
                 else if (selected.includes('__untagged__')) pass = tags.length === 0;
                 else pass = selected.some(s => tags.includes(s));
-                if (!pass) { vis = false; break; }
-            } else if (cell.textContent.trim() !== f) {
-                vis = false; break;
+            } else {
+                // All other filterable columns: OR-match across picked values.
+                pass = selected.includes(cell.textContent.trim());
             }
+            if (!pass) { vis = false; break; }
         }
         row.style.display = vis ? '' : 'none';
     });
@@ -1093,16 +923,20 @@ function refreshFilterIndicators() {
             activeCount++;
             const headerCell = table.querySelector('thead tr:first-child th[data-col="' + s.dataset.col + '"]');
             const label = headerCell ? headerCell.textContent.trim() : 'col ' + s.dataset.col;
-            // Render the multi-select tag column's value nicely
+            // Render multi-select values for the banner. Every filter is
+            // now multi-select (except the 4 Yes/No boolean columns whose
+            // .value is a plain single string with no separator).
             let displayValue;
+            const parts = s.value.split(MS_SEP).filter(Boolean);
             if (parseInt(s.dataset.col) === TAG_FILTER_COL) {
-                const parts = s.value.split(',').filter(Boolean);
                 if (parts.includes('__all_tagged__')) displayValue = 'All Tagged';
                 else if (parts.includes('__untagged__')) displayValue = 'Untagged';
                 else if (parts.length > 2) displayValue = parts.length + ' tags';
                 else displayValue = parts.join(', ');
+            } else if (parts.length > 2) {
+                displayValue = parts.length + ' selected';
             } else {
-                displayValue = s.value;
+                displayValue = parts.join(', ');
             }
             activeLabels.push(label + '=' + displayValue);
         } else {
